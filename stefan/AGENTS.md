@@ -51,6 +51,8 @@ there.
 - `shell/normal/watchface`: a short Back press on a watchface that registered
   a Back click handler goes to the watchface instead of dismissing the
   timeline peek. Back-hold quick launch and Back+Up stay the kernel's.
+- `applib/voice`: Down stops a dictation recording, like Select (Iris
+  records with the system dictation UI).
 
 ## Setup on a new Mac
 

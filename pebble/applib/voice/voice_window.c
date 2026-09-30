@@ -919,7 +919,7 @@ static void prv_mic_click_handler(ClickRecognizerRef recognizer, void *context) 
     }
     prv_exit_and_send_result_event(context, status);
   } else {
-    // Select button pressed
+    // Select or Down pressed
     prv_stop_dictation(context);
   }
 }
@@ -929,6 +929,8 @@ static void prv_back_select_click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_BACK, &prv_mic_click_handler);
   window_set_click_context(BUTTON_ID_SELECT, context);
   window_single_click_subscribe(BUTTON_ID_SELECT, &prv_mic_click_handler);
+  window_set_click_context(BUTTON_ID_DOWN, context);
+  window_single_click_subscribe(BUTTON_ID_DOWN, &prv_mic_click_handler);
 }
 
 static void prv_back_click_config_provider(void *context) {
