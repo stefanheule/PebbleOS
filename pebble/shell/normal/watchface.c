@@ -10,12 +10,15 @@
 
 #include <applib/app_launch_reason.h>
 #include <applib/app_timer.h>
+#include <applib/ui/app_window_stack.h>
 #include <applib/ui/click_internal.h>
+#include <applib/ui/window.h>
 #include <apps/system/launcher/launcher.h>
 #include <apps/system/settings/quick_launch_setup_menu.h>
 #include <apps/system/timeline/timeline.h>
 #include <apps/system_app_ids.h>
 #include <kernel/event_loop.h>
+#include <kernel/events.h>
 #include <kernel/low_power.h>
 #include <popups/timeline/peek.h>
 #include <process_management/app_manager.h>
@@ -248,8 +251,35 @@ static void prv_launch_launcher_app(ClickRecognizerRef recognizer, void *data) {
       recognizer);
 }
 
-static void prv_dismiss_timeline_peek(ClickRecognizerRef recognizer, void *data) {
+static bool prv_watchface_handles_back(void) {
+  const Window *top = app_window_stack_get_top_window();
+  return top && top->overrides_back_button;
+}
+
+// Delivered to the app task only: the kernel already recognized the click, and
+// masking KernelMain keeps it from coming back through the watchface handler.
+static void prv_forward_back_click_to_watchface(void) {
+  const PebbleTaskBitset not_kernel_main = (1 << PebbleTask_KernelMain);
+  PebbleEvent down = {
+    .type = PEBBLE_BUTTON_DOWN_EVENT,
+    .task_mask = not_kernel_main,
+    .button.button_id = BUTTON_ID_BACK,
+  };
+  event_put(&down);
+  PebbleEvent up = {
+    .type = PEBBLE_BUTTON_UP_EVENT,
+    .task_mask = not_kernel_main,
+    .button.button_id = BUTTON_ID_BACK,
+  };
+  event_put(&up);
+}
+
+static void prv_back_short_press(ClickRecognizerRef recognizer, void *data) {
   if (prv_is_any_combo_active()) {
+    return;
+  }
+  if (prv_watchface_handles_back()) {
+    prv_forward_back_click_to_watchface();
     return;
   }
   timeline_peek_dismiss();
@@ -259,7 +289,7 @@ static void prv_watchface_configure_click_handlers(void) {
   prv_configure_click_handler(BUTTON_ID_UP, prv_launch_up_down);
   prv_configure_click_handler(BUTTON_ID_DOWN, prv_launch_up_down);
   prv_configure_click_handler(BUTTON_ID_SELECT, prv_launch_launcher_app);
-  prv_configure_click_handler(BUTTON_ID_BACK, prv_dismiss_timeline_peek);
+  prv_configure_click_handler(BUTTON_ID_BACK, prv_back_short_press);
 }
 
 void watchface_init(void) {
