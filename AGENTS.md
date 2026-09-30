@@ -117,3 +117,8 @@ Others:
 
 - If fixing Linear or GitHub issues, include in the commit body a line with
   `Fixes XXX`, where XXX is the issue number.
+
+## Stefan's fork
+
+This is a personal fork. Read `stefan/AGENTS.md` for its branches, versions
+and release script before changing anything.
