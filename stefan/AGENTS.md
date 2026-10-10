@@ -18,6 +18,15 @@ release tag; everything else is upstream's.
   version from `git describe`, so this tag is what the watch's About screen
   and the Core app show.
 
+## Two checkouts
+
+Vega agents work on this fork both on the Mac (`~/dev/PebbleOS`) and on
+Nova's `n2-agents` (same path, Ubuntu, set up by the `nova-vega-agent` role in
+core). Nothing fast-forwards either checkout on its own, so start with
+`git pull --ff-only` on the current `stefan/<tag>` branch and push what you
+commit. After a `stefan/rebase.sh` on one machine, check out the new branch
+on the other.
+
 ## Releasing
 
 ```shell
@@ -53,6 +62,12 @@ there.
   timeline peek. Back-hold quick launch and Back+Up stay the kernel's.
 - `applib/voice`: Down stops a dictation recording, like Select (Iris
   records with the system dictation UI).
+
+## Setup on Linux
+
+`n2-agents` is provisioned by core's `infra/ansible/playbooks/vega-agent.yml`
+(the Ubuntu packages, plus `cmake` and `ninja-build`, the SDK, submodules and
+`.venv`); Orbit's update key is in `~/.config/core-keychain` there.
 
 ## Setup on a new Mac
 
