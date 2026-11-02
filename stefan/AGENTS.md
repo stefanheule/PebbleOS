@@ -9,11 +9,19 @@ release tag; everything else is upstream's.
 
 - `upstream` is `coredevices/PebbleOS`; `origin` is the fork.
 - One branch per upstream release, `stefan/<tag>` (e.g. `stefan/v4.38.4`),
-  holding the patches on top of that tag. Releases are tags on `v4.xx-branch`
-  upstream, not on `main`, so always base on a release tag.
+  holding the patches on top of that tag. Always base on a stable upstream
+  release tag with a `normal_obelix_pvt_<tag>.pbz` asset. Pick the highest
+  three-part version, not publication order or GitHub’s latest flag: older
+  maintenance branches also receive releases.
 - A branch is never rewritten. Moving to a new release is
   `stefan/rebase.sh <tag>`, which starts `stefan/<tag>` and leaves the old
   branch alone. Never force-push.
+- Stefan explicitly authorizes this workflow for future requested firmware
+  updates: create/switch to the next `stefan/<tag>` branch and rebase the
+  custom patches with `stefan/rebase.sh`, resolve routine conflicts, verify,
+  commit, push and publish without asking for approval again. This is a
+  scoped exception to core’s main-only/no-rebase rules for this separate
+  repository. Preserve previous release branches and never force-push.
 - Fork builds are tagged `<upstream tag>-stefan.N`. The firmware takes its
   version from `git describe`, so this tag is what the watch's About screen
   and the Core app show.
@@ -68,6 +76,10 @@ there.
 `n2-agents` is provisioned by core's `infra/ansible/playbooks/vega-agent.yml`
 (the Ubuntu packages, plus `cmake` and `ninja-build`, the SDK, submodules and
 `.venv`); Orbit's update key is in `~/.config/core-keychain` there.
+Read `SDK_VERSION` after updating and install that SDK version if needed;
+source its `env.sh` before building. Run heavy builds/tests with
+`nova-agent-work` and keep their output under its scratch workspace.
+Both firmware slots must build before publishing.
 
 ## Setup on a new Mac
 
@@ -78,6 +90,6 @@ git submodule update --init --depth 1 --recursive
 python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
 ```
 
-Testing on the emulator: `pbl configure --board qemu_emery && pbl build
-qemu_image_micro qemu_image_spi && pbl qemu`, then `pebble install x.pbw
---qemu localhost:12344`.
+Testing on the emulator: `pbl configure --board qemu_emery && pbl build &&
+pbl run`. See `docs/development/emulation/emulator.md` and
+`docs/development/tests/integration.md` for current emulator and test commands.
