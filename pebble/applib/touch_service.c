@@ -14,15 +14,18 @@
 #include <process_state/app_state/app_state.h>
 #include <syscall/syscall.h>
 
+//! @param raw_slot whether the caller manages the app-facing raw slot
+//! (touch_service_subscribe) rather than the system slot.
 //! @return the per-task touch service state, or NULL if the current task is
-//! not permitted to use the touch service (e.g. background workers, or
-//! watchfaces). Callers must no-op when this returns NULL.
-static TouchServiceState *prv_get_state(void) {
+//! not permitted to use the touch service (e.g. background workers). Callers
+//! must no-op when this returns NULL.
+static TouchServiceState *prv_get_state(bool raw_slot) {
   PebbleTask task = pebble_task_get_current();
   switch (task) {
     case PebbleTask_App:
-      // Touch is reserved for watchapps; watchfaces must not consume it.
-      if (sys_app_is_watchface()) {
+      // A watchface gets touch only by subscribing to it itself; the system
+      // slot (touch navigation) stays reserved for watchapps.
+      if (!raw_slot && sys_app_is_watchface()) {
         return nullptr;
       }
       return app_state_get_touch_service_state();
@@ -37,7 +40,8 @@ static TouchServiceState *prv_get_state(void) {
 }
 
 static void prv_handle_touch_event(PebbleEvent *e, void *context) {
-  TouchServiceState *state = prv_get_state();
+  // A watchface's system slot is never set, so it only ever sees its raw slot.
+  TouchServiceState *state = prv_get_state(true /* raw_slot */);
   if (!state || e->type != PEBBLE_TOUCH_EVENT) {
     return;
   }
@@ -69,7 +73,7 @@ static void prv_update_subscription(TouchServiceState *state) {
 }
 
 void touch_service_set_system_handler(TouchServiceHandler handler, void *context) {
-  TouchServiceState *state = prv_get_state();
+  TouchServiceState *state = prv_get_state(false /* raw_slot */);
   if (!state) {
     return;
   }
@@ -79,7 +83,7 @@ void touch_service_set_system_handler(TouchServiceHandler handler, void *context
 }
 
 void touch_service_subscribe(TouchServiceHandler handler, void *context) {
-  TouchServiceState *state = prv_get_state();
+  TouchServiceState *state = prv_get_state(true /* raw_slot */);
   if (!state) {
     return;
   }
@@ -91,7 +95,7 @@ void touch_service_subscribe(TouchServiceHandler handler, void *context) {
 }
 
 void touch_service_unsubscribe(void) {
-  TouchServiceState *state = prv_get_state();
+  TouchServiceState *state = prv_get_state(true /* raw_slot */);
   if (!state) {
     return;
   }
