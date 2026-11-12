@@ -36,8 +36,9 @@ PebbleTask pebble_task_get_current(void) {
   return PebbleTask_App;
 }
 
+static bool s_is_watchface;
 bool sys_app_is_watchface(void) {
-  return false;
+  return s_is_watchface;
 }
 
 TouchServiceState *app_state_get_touch_service_state(void) {
@@ -105,19 +106,19 @@ static void prv_order_raw_handler(const TouchEvent *event, void *context) {
   s_raw_seq = ++s_seq;
 }
 
-static void prv_deliver_touch(TouchEventType type, int16_t x, int16_t y) {
+static void prv_deliver_touch_event(TouchEvent event) {
   cl_assert(s_subscribed_info != nullptr);
   PebbleEvent e = {
     .type = PEBBLE_TOUCH_EVENT,
     .touch = {
-      .event = {
-        .type = type,
-        .x = x,
-        .y = y,
-      },
+      .event = event,
     },
   };
   s_subscribed_info->handler(&e, s_subscribed_info->context);
+}
+
+static void prv_deliver_touch(TouchEventType type, int16_t x, int16_t y) {
+  prv_deliver_touch_event((TouchEvent){.type = type, .x = x, .y = y});
 }
 
 // setup / teardown
@@ -127,6 +128,8 @@ void test_touch_service__initialize(void) {
   s_unsubscribe_count = 0;
   s_subscribed_info = nullptr;
   s_touch_reset_count = 0;
+  s_raw_subscribed = false;
+  s_is_watchface = false;
   s_system_rec = (HandlerRecord){};
   s_raw_rec = (HandlerRecord){};
   touch_service_state_init(&s_state);
@@ -234,4 +237,53 @@ void test_touch_service__unsubscribe_keeps_system_slot(void) {
   cl_assert(s_state.system_handler == prv_system_handler);
   cl_assert(s_state.subscribed);
   cl_assert_equal_i(s_unsubscribe_count, 0);
+}
+
+// A watchface that subscribes gets raw touch events, the wake-gate stamp included.
+void test_touch_service__watchface_can_subscribe(void) {
+  s_is_watchface = true;
+
+  touch_service_subscribe(prv_raw_handler, &s_raw_marker);
+  cl_assert_equal_i(s_subscribe_count, 1);
+  cl_assert(s_raw_subscribed);
+  cl_assert_equal_i(s_touch_reset_count, 1);
+
+  const TouchEvent unarmed = {
+    .type = TouchEvent_Touchdown,
+    .non_navigational = true,
+    .x = 90,
+    .y = 200,
+  };
+  prv_deliver_touch_event(unarmed);
+  cl_assert_equal_i(s_raw_rec.calls, 1);
+  cl_assert_equal_p(s_raw_rec.last_context, &s_raw_marker);
+  cl_assert_equal_i(s_raw_rec.last_event.type, TouchEvent_Touchdown);
+  cl_assert(s_raw_rec.last_event.non_navigational);
+  cl_assert_equal_i(s_raw_rec.last_event.x, 90);
+  cl_assert_equal_i(s_raw_rec.last_event.y, 200);
+
+  prv_deliver_touch(TouchEvent_Liftoff, 91, 201);
+  cl_assert_equal_i(s_raw_rec.calls, 2);
+  cl_assert(!s_raw_rec.last_event.non_navigational);
+
+  touch_service_unsubscribe();
+  cl_assert(!s_raw_subscribed);
+  cl_assert(!s_state.subscribed);
+  cl_assert_equal_i(s_unsubscribe_count, 1);
+}
+
+// Touch navigation stays reserved for watchapps: a watchface's system slot is never set, and
+// its own subscription does not pick up a system handler.
+void test_touch_service__watchface_system_slot_declined(void) {
+  s_is_watchface = true;
+
+  touch_service_set_system_handler(prv_system_handler, &s_system_marker);
+  cl_assert(s_state.system_handler == nullptr);
+  cl_assert(!s_state.subscribed);
+  cl_assert_equal_i(s_subscribe_count, 0);
+
+  touch_service_subscribe(prv_raw_handler, &s_raw_marker);
+  prv_deliver_touch(TouchEvent_Touchdown, 1, 2);
+  cl_assert_equal_i(s_system_rec.calls, 0);
+  cl_assert_equal_i(s_raw_rec.calls, 1);
 }

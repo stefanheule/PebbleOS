@@ -70,6 +70,11 @@ there.
   timeline peek. Back-hold quick launch and Back+Up stay the kernel's.
 - `applib/voice`: Down stops a dictation recording, like Select (Iris
   records with the system dictation UI).
+- `applib/touch_service`: a watchface may `touch_service_subscribe` and then
+  gets raw touch events (Graphite opens its calendar card with a tap). A
+  touch begun before the watch was woken arrives with `non_navigational`.
+  Touch navigation stays reserved for watchapps, and faces that do not
+  subscribe get no touch, as upstream.
 
 ## Setup on Linux
 
