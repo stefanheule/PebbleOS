@@ -11,6 +11,9 @@
 typedef void (*TouchServiceHandler)(const TouchEvent *event, void *context);
 
 //! Subscribe to touch events. The touch sensor is enabled while subscribed.
+//! Watchfaces may subscribe too; on the idle watchface a touch that starts
+//! before the user woke the watch carries non_navigational for its whole
+//! gesture.
 //! @param handler Callback invoked for each touch event
 //! @param context User context passed to the callback
 void touch_service_subscribe(TouchServiceHandler handler, void *context);
