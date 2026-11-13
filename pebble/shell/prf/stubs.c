@@ -46,7 +46,8 @@ void wakeup_popup_window(uint8_t missed_apps_count, uint8_t *missed_apps_banks) 
 void watchface_set_default_install_id(AppInstallId id) {
 }
 
-void watchface_handle_button_event(PebbleEvent *e) {
+bool watchface_handle_button_event(PebbleEvent *e) {
+  return false;
 }
 
 void app_idle_timeout_refresh(void) {

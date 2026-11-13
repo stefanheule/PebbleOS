@@ -23,6 +23,7 @@
 #include <popups/timeline/peek.h>
 #include <process_management/app_manager.h>
 #include <process_management/pebble_process_md.h>
+#include <process_state/app_state/app_state.h>
 
 #define QUICK_LAUNCH_HOLD_MS (400)
 #define BIT_SET              (1)
@@ -36,6 +37,10 @@ static ClickManager s_click_manager;
 static uint8_t s_buttons_pressed = BIT_CLEAR;
 static AppTimer *s_combo_back_hold_timer = nullptr;
 static uint8_t s_active_combo_buttons = BIT_CLEAR;
+// Presses of Up, Select or Down that the watchface claimed at button-down. They
+// go to the app task until their button-up, so a window change mid-press cannot
+// split one press between the kernel and the watchface.
+static uint8_t s_watchface_buttons = BIT_CLEAR;
 
 static void prv_launch_quick_launch_app(AppInstallId app_id, ButtonId button,
                                         AppLaunchReason timeline_reason,
@@ -251,9 +256,36 @@ static void prv_launch_launcher_app(ClickRecognizerRef recognizer, void *data) {
       recognizer);
 }
 
+static bool prv_click_config_has_handler(const ClickConfig *cfg) {
+  return cfg->click.handler || cfg->multi_click.handler || cfg->long_click.handler ||
+         cfg->long_click.release_handler || cfg->raw.down_handler || cfg->raw.up_handler;
+}
+
+// Whether the running watchface takes this button: its focused top window,
+// whose click config the app's click manager holds, has a handler for it, or
+// the face pushed a window above its main one (e.g. an ActionMenu), which then
+// gets every button the way a watchapp's window would.
+static bool prv_watchface_wants_button(ButtonId button_id) {
+  if (!app_window_stack_get_top_window()) {
+    return false;
+  }
+  if (app_window_stack_count() > 1) {
+    return true;
+  }
+  return prv_click_config_has_handler(
+      &app_state_get_click_manager()->recognizers[button_id].config);
+}
+
+// The applib side never pops the face's last window, so a forwarded Back can at
+// most pop a window the face pushed.
 static bool prv_watchface_handles_back(void) {
-  const Window *top = app_window_stack_get_top_window();
-  return top && top->overrides_back_button;
+  return prv_watchface_wants_button(BUTTON_ID_BACK);
+}
+
+// Back is never claimed: its short press is forwarded by prv_back_short_press,
+// so that Back-hold quick launch and the Back+Up combo stay the kernel's.
+static bool prv_watchface_claims_button(ButtonId button_id) {
+  return (button_id != BUTTON_ID_BACK) && prv_watchface_wants_button(button_id);
 }
 
 // Delivered to the app task only: the kernel already recognized the click, and
@@ -297,24 +329,40 @@ void watchface_init(void) {
   prv_watchface_configure_click_handlers();
 }
 
-void watchface_handle_button_event(PebbleEvent *e) {
+bool watchface_handle_button_event(PebbleEvent *e) {
+  const ButtonId button_id = e->button.button_id;
+  const uint8_t button_bit = (BIT_SET << button_id);
   if (prv_should_ignore_button_click()) {
-    return;
+    if (e->type == PEBBLE_BUTTON_UP_EVENT) {
+      s_watchface_buttons &= ~button_bit;
+    }
+    return false;
   }
   switch (e->type) {
     case PEBBLE_BUTTON_DOWN_EVENT:
-      s_buttons_pressed |= (BIT_SET << e->button.button_id);
-      click_recognizer_handle_button_down(&s_click_manager.recognizers[e->button.button_id]);
+      s_buttons_pressed |= button_bit;
+      if (prv_watchface_claims_button(button_id)) {
+        // The app's own click recognizer handles the raw press. It still
+        // counts toward the kernel's button combos.
+        s_watchface_buttons |= button_bit;
+        prv_check_combo_back_hold();
+        return true;
+      }
+      s_watchface_buttons &= ~button_bit;
+      click_recognizer_handle_button_down(&s_click_manager.recognizers[button_id]);
       prv_check_combo_back_hold();
-      break;
+      return false;
     case PEBBLE_BUTTON_UP_EVENT:
-      s_buttons_pressed &= ~(BIT_SET << e->button.button_id);
+      s_buttons_pressed &= ~button_bit;
       prv_check_combo_back_hold();
-      click_recognizer_handle_button_up(&s_click_manager.recognizers[e->button.button_id]);
-      break;
+      if (s_watchface_buttons & button_bit) {
+        s_watchface_buttons &= ~button_bit;
+        return true;
+      }
+      click_recognizer_handle_button_up(&s_click_manager.recognizers[button_id]);
+      return false;
     default:
       pbl_panic("Invalid event type: %u", e->type);
-      break;
   }
 }
 
@@ -347,4 +395,7 @@ void watchface_start_low_power(void) {
 
 void watchface_reset_click_manager(void) {
   click_manager_reset(&s_click_manager);
+  // A focused modal takes the rest of any press, and the app resets its own
+  // recognizers when it loses focus.
+  s_watchface_buttons = BIT_CLEAR;
 }
