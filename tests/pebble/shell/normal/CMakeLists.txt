@@ -43,3 +43,9 @@ pbl_clar_test(test_dark_mode_updater
     pebble/shell/normal/dark_mode_updater.c
     tests/fakes/fake_rtc.c
 )
+
+pbl_clar_test(test_watchface
+  SOURCES
+    pebble/shell/normal/watchface.c
+    pebble/applib/ui/click.c
+)

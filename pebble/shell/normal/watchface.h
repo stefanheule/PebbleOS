@@ -10,7 +10,11 @@
 
 void watchface_init(void);
 
-void watchface_handle_button_event(PebbleEvent *e);
+//! Runs the watchface's kernel-side button handling for a button event.
+//! @return true if the event belongs to the app task: a press of Up, Select or
+//! Down that the watchface claimed at button-down, because its top window has a
+//! click handler for the button or it pushed a window over its main one.
+bool watchface_handle_button_event(PebbleEvent *e);
 
 void watchface_set_default_install_id(AppInstallId id);
 

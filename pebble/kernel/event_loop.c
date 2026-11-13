@@ -236,9 +236,8 @@ static void launcher_handle_button_event(PebbleEvent *e) {
     return;
   }
 
-  if (watchface_running) {
-    watchface_handle_button_event(e);
-    // suppress the button event from the app task
+  if (watchface_running && !watchface_handle_button_event(e)) {
+    // suppress the button event from the app task unless the watchface claimed the button
     e->task_mask |= 1 << PebbleTask_App;
   }
 }

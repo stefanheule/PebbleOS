@@ -9,7 +9,7 @@
 
 void watchface_init(void);
 
-void watchface_handle_button_event(PebbleEvent *e);
+bool watchface_handle_button_event(PebbleEvent *e);
 
 AppInstallId watchface_get_default_install_id(void);
 

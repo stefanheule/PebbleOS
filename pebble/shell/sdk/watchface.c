@@ -91,7 +91,7 @@ void watchface_init(void) {
   prv_watchface_configure_click_handlers();
 }
 
-void watchface_handle_button_event(PebbleEvent *e) {
+bool watchface_handle_button_event(PebbleEvent *e) {
   // Only handle button press if app state indicates that the app is still running
   // which is not in the process of closing
   WatchfaceData *data = &s_watchface_data;
@@ -109,6 +109,7 @@ void watchface_handle_button_event(PebbleEvent *e) {
         break;
     }
   }
+  return false;
 }
 
 void watchface_reset_click_manager(void) {
