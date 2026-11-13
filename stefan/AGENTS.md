@@ -75,6 +75,15 @@ there.
   touch begun before the watch was woken arrives with `non_navigational`.
   Touch navigation stays reserved for watchapps, and faces that do not
   subscribe get no touch, as upstream.
+- `shell/normal/watchface`: Up, Select and Down go to the watchface while its
+  focused top window has any click handler for that button, or while it has
+  pushed a window over its main one (Graphite's event sheet and the
+  ActionMenu it opens). The choice is made at button-down and holds until
+  button-up; the app gets the raw press, so its own recognizer does single,
+  repeating, long and multi clicks. Unclaimed buttons keep the launcher,
+  timeline and quick launch, and combos still count claimed buttons. The
+  Back forwarding above follows the same test, so a pushed window pops on
+  Back and a face that drops its Back handler gets the peek dismissal back.
 
 ## Setup on Linux
 
