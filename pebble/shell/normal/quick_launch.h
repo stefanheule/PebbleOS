@@ -29,3 +29,22 @@ bool quick_launch_combo_up_down_is_enabled(void);
 AppInstallId quick_launch_combo_up_down_get_app(void);
 void quick_launch_combo_up_down_set_app(AppInstallId app_id);
 void quick_launch_combo_up_down_set_enabled(bool enabled);
+
+//! The quick launch assignments, in the order of the AppMessage keys the phone sets them with
+//! (see APP_MESSAGE_KEY_QUICK_LAUNCH_FIRST).
+typedef enum QuickLaunchSlot {
+  QuickLaunchSlotSingleClickUp,
+  QuickLaunchSlotSingleClickDown,
+  QuickLaunchSlotUp,
+  QuickLaunchSlotSelect,
+  QuickLaunchSlotDown,
+  QuickLaunchSlotBack,
+  QuickLaunchSlotComboBackUp,
+  QuickLaunchSlotComboUpDown,
+  QuickLaunchSlotCount,
+} QuickLaunchSlot;
+
+//! Assigns the app with @p uuid to @p slot, installed or not, or unassigns the slot for
+//! UUID_INVALID. Writes the pref only if that changes it.
+//! @return true if the pref was written.
+bool quick_launch_set_uuid(QuickLaunchSlot slot, const Uuid *uuid);

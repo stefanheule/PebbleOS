@@ -84,6 +84,15 @@ there.
   timeline and quick launch, and combos still count claimed buttons. The
   Back forwarding above follows the same test, so a pushed window pops on
   Back and a face that drops its Back handler gets the peek dismissal back.
+- `applib/app_message`: the phone sets quick launch through the Graphite
+  watchface (`7e5267ac-798f-4953-a645-1b87a5c29d96`). Reserved AppMessage
+  keys `0x57505201`..`0x57505208` (Tap Up, Tap Down, Hold Up, Hold Center,
+  Hold Down, Hold Back, Back+Up, Up+Down) carry a 16-byte app UUID, or all
+  `0xff` to unassign; absent or malformed keys are left alone. The inbox
+  hands them to `sys_app_message_set_quick_launch`, which ignores them
+  unless Graphite is the running app and writes a `ql*` pref only when it
+  changes (so it syncs to the Core app like a change made on the watch).
+  Graphite still receives the keys and ignores them; ACKs are unchanged.
 
 ## Setup on Linux
 

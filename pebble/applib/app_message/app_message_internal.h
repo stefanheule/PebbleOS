@@ -33,6 +33,17 @@ typedef struct PBL_PACKED {
   Uuid uuid;
   Dictionary dictionary; //!< Variable length!
 } AppMessagePush;
+
+//! Reserved AppMessage keys with which the phone sets the quick launch apps through the Graphite
+//! watchface, one per QuickLaunchSlot from FIRST to LAST. Each value is a 16-byte app UUID, or
+//! UUID_INVALID to unassign. They still reach the app's inbox like any other key.
+#define APP_MESSAGE_KEY_QUICK_LAUNCH_FIRST (0x57505201)
+#define APP_MESSAGE_KEY_QUICK_LAUNCH_LAST  (0x57505208)
+//! Graphite, the only app whose messages may set them: 7e5267ac-798f-4953-a645-1b87a5c29d96
+#define APP_MESSAGE_QUICK_LAUNCH_APP_UUID                                                     \
+  UuidMake(0x7e, 0x52, 0x67, 0xac, 0x79, 0x8f, 0x49, 0x53, 0xa6, 0x45, 0x1b, 0x87, 0xa5, 0xc2, \
+           0x9d, 0x96)
+
 // AppMessageHeader and Uuid size should be opaque to user of API
 #define APP_MSG_HDR_OVRHD_SIZE (offsetof(AppMessagePush, dictionary))
 

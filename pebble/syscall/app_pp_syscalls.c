@@ -15,6 +15,7 @@
 #include <comm/bt_conn_mgr.h>
 #include <process_management/app_install_manager.h>
 #include <process_management/app_manager.h>
+#include <shell/normal/quick_launch.h>
 
 static bool prv_is_endpoint_allowed(uint16_t endpoint_id) {
   return (endpoint_id == APP_MESSAGE_ENDPOINT_ID);
@@ -78,4 +79,16 @@ PBL_SYSCALL(void, sys_app_comm_set_responsiveness, (VAL, SniffInterval, interval
 
 PBL_SYSCALL(bool, sys_system_pp_has_capability, (VAL, enum pbl_pp_capability, capability)) {
   return pbl_pp_session_has_capability(pbl_pp_session_get_system(), capability);
+}
+
+PBL_SYSCALL(void, sys_app_message_set_quick_launch, (VAL, uint32_t, key),
+            (IN, const Uuid *, uuid)) {
+  const Uuid quick_launch_app = APP_MESSAGE_QUICK_LAUNCH_APP_UUID;
+  if (key < APP_MESSAGE_KEY_QUICK_LAUNCH_FIRST || key > APP_MESSAGE_KEY_QUICK_LAUNCH_LAST ||
+      !uuid_equal(&app_manager_get_current_app_md()->uuid, &quick_launch_app)) {
+    return;
+  }
+  if (quick_launch_set_uuid((QuickLaunchSlot)(key - APP_MESSAGE_KEY_QUICK_LAUNCH_FIRST), uuid)) {
+    PBL_LOG_INFO("Quick launch key 0x%" PRIx32 " set by the phone", key);
+  }
 }

@@ -2002,6 +2002,39 @@ void quick_launch_combo_up_down_set_enabled(bool enabled) {
   prv_pref_set(PREF_KEY_QUICK_LAUNCH_COMBO_UP_DOWN, &pref, sizeof(pref));
 }
 
+bool quick_launch_set_uuid(QuickLaunchSlot slot, const Uuid *uuid) {
+  static const struct {
+    const QuickLaunchPreference *pref;
+    const char *key;
+  } s_slots[QuickLaunchSlotCount] = {
+    [QuickLaunchSlotSingleClickUp] = {&s_quick_launch_single_click_up,
+                                      PREF_KEY_QUICK_LAUNCH_SINGLE_CLICK_UP},
+    [QuickLaunchSlotSingleClickDown] = {&s_quick_launch_single_click_down,
+                                        PREF_KEY_QUICK_LAUNCH_SINGLE_CLICK_DOWN},
+    [QuickLaunchSlotUp] = {&s_quick_launch_up, PREF_KEY_QUICK_LAUNCH_UP},
+    [QuickLaunchSlotSelect] = {&s_quick_launch_select, PREF_KEY_QUICK_LAUNCH_SELECT},
+    [QuickLaunchSlotDown] = {&s_quick_launch_down, PREF_KEY_QUICK_LAUNCH_DOWN},
+    [QuickLaunchSlotBack] = {&s_quick_launch_back, PREF_KEY_QUICK_LAUNCH_BACK},
+    [QuickLaunchSlotComboBackUp] = {&s_quick_launch_combo_back_up,
+                                    PREF_KEY_QUICK_LAUNCH_COMBO_BACK_UP},
+    [QuickLaunchSlotComboUpDown] = {&s_quick_launch_combo_up_down,
+                                    PREF_KEY_QUICK_LAUNCH_COMBO_UP_DOWN},
+  };
+  if ((unsigned int)slot >= QuickLaunchSlotCount) {
+    return false;
+  }
+  QuickLaunchPreference pref = {
+    .enabled = !uuid_is_invalid(uuid),
+    .uuid = *uuid,
+  };
+  const QuickLaunchPreference *current = s_slots[slot].pref;
+  if (current->enabled == pref.enabled && uuid_equal(&current->uuid, &pref.uuid)) {
+    return false;
+  }
+  prv_pref_set(s_slots[slot].key, &pref, sizeof(pref));
+  return true;
+}
+
 void watchface_set_default_install_id(AppInstallId app_id) {
   Uuid uuid;
   app_install_get_uuid_for_install_id(app_id, &uuid);

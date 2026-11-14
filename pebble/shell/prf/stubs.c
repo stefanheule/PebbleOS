@@ -358,3 +358,8 @@ void timeline_peek_handle_process_start(void) {
 
 void timeline_peek_handle_process_kill(void) {
 }
+
+#include <shell/normal/quick_launch.h>
+bool quick_launch_set_uuid(QuickLaunchSlot slot, const Uuid *uuid) {
+  return false;
+}

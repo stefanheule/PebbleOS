@@ -3,10 +3,12 @@
 
 #include <pbl/fs/fs.h>
 #include <pbl/services/blob_db/prefs_db.h>
+#include <pbl/settings/settings.h>
 #include <pbl/util/size.h>
 #include <pbl/util/uuid.h>
 
 #include <clar.h>
+#include <shell/normal/quick_launch.h>
 #include <shell/prefs.h>
 #include <shell/prefs_private.h>
 
@@ -166,4 +168,73 @@ void test_prefs_db__dark_mode_schedule(void) {
     shell_prefs_get_dark_mode_schedule(&read);
     cl_assert_equal_m(&read, &expected, sizeof(expected));
   }
+}
+
+// Counts the writes to the shell prefs file, which is what settings_blob_db syncs from.
+static int s_shell_pref_writes;
+
+static void prv_count_shell_pref_write(const void *key, size_t key_len, uint32_t last_modified,
+                                       void *user_data) {
+  ++s_shell_pref_writes;
+}
+
+static struct pbl_settings_watch s_shell_prefs_watch = {
+  .name = SHELL_PREFS_FILE_NAME,
+  .cb = prv_count_shell_pref_write,
+};
+
+typedef struct PBL_PACKED {
+  bool enabled;
+  Uuid uuid;
+} StoredQuickLaunch;
+
+static StoredQuickLaunch prv_read_quick_launch(const char *key) {
+  StoredQuickLaunch stored;
+  cl_assert_equal_i(prefs_db_read((uint8_t *)key, strlen(key), (uint8_t *)&stored, sizeof(stored)),
+                    0);
+  return stored;
+}
+
+void test_prefs_db__quick_launch_set_uuid(void) {
+  static bool s_watching;
+  if (!s_watching) {
+    pbl_settings_watch_add(&s_shell_prefs_watch);
+    s_watching = true;
+  }
+  static const char *const s_keys[QuickLaunchSlotCount] = {
+    "qlSingleClickUp", "qlSingleClickDown", "qlUp",          "qlSelect",
+    "qlDown",          "qlBack",            "qlComboBackUp", "qlComboUpDown",
+  };
+  for (int slot = 0; slot < QuickLaunchSlotCount; slot++) {
+    const Uuid uuid = {0x10, (uint8_t)slot, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+
+    // Assigning writes the slot's own key, enabled:
+    s_shell_pref_writes = 0;
+    cl_assert_equal_b(quick_launch_set_uuid(slot, &uuid), true);
+    cl_assert_equal_i(s_shell_pref_writes, 1);
+    StoredQuickLaunch stored = prv_read_quick_launch(s_keys[slot]);
+    cl_assert_equal_b(stored.enabled, true);
+    cl_assert(uuid_equal(&stored.uuid, &uuid));
+
+    // The same value again writes nothing:
+    cl_assert_equal_b(quick_launch_set_uuid(slot, &uuid), false);
+    cl_assert_equal_i(s_shell_pref_writes, 1);
+
+    // UUID_INVALID unassigns, once:
+    cl_assert_equal_b(quick_launch_set_uuid(slot, &UUID_INVALID), true);
+    stored = prv_read_quick_launch(s_keys[slot]);
+    cl_assert_equal_b(stored.enabled, false);
+    cl_assert(uuid_is_invalid(&stored.uuid));
+    cl_assert_equal_b(quick_launch_set_uuid(slot, &UUID_INVALID), false);
+    cl_assert_equal_i(s_shell_pref_writes, 2);
+  }
+
+  // A disabled slot that kept its app is enabled again by the same UUID:
+  const Uuid uuid = {0x20, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+  cl_assert_equal_b(quick_launch_set_uuid(QuickLaunchSlotComboUpDown, &uuid), true);
+  quick_launch_combo_up_down_set_enabled(false);
+  cl_assert_equal_b(quick_launch_set_uuid(QuickLaunchSlotComboUpDown, &uuid), true);
+  cl_assert_equal_b(quick_launch_combo_up_down_is_enabled(), true);
+
+  cl_assert_equal_b(quick_launch_set_uuid(QuickLaunchSlotCount, &uuid), false);
 }
