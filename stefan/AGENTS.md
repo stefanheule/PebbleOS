@@ -88,10 +88,13 @@ there.
 ## Setup on Linux
 
 `n2-agents` is provisioned by core's `infra/ansible/playbooks/vega-agent.yml`
-(the Ubuntu packages, plus `cmake` and `ninja-build`, the SDK, submodules and
-`.venv`); Orbit's update key is in `~/.config/core-keychain` there.
-Read `SDK_VERSION` after updating and install that SDK version if needed;
-source its `env.sh` before building. Run heavy builds/tests with
+(the Ubuntu packages, plus `cmake`, `ninja-build` and, since v4.47.0,
+`device-tree-compiler`, the SDK, submodules and `.venv`); Orbit's update key
+is in `~/.config/core-keychain` there. Read `SDK_VERSION` after updating and
+install that SDK version if needed (bump `vega_agent_pebbleos_sdk_version` in
+that role too); the build picks the newest installed SDK that satisfies it.
+After a rebase, `pip install -r requirements.txt` in `.venv` and check
+`requirements-brew.txt` on the Mac: new releases add host tools. Run heavy builds/tests with
 `nova-agent-work` and keep their output under its scratch workspace.
 Both firmware slots must build before publishing.
 
