@@ -5,18 +5,23 @@
 
 #include <string.h>
 
+#include <pbl/crc/crc.h>
 #include <pbl/kernel/malloc.h>
 #include <pbl/kernel/work.h>
 #include <pbl/logging/logging.h>
 #include <pbl/pp/protocol.h>
 #include <pbl/pp/send.h>
 #include <pbl/services/app_session.h>
+#include <pbl/services/blob_db/app_db.h>
 #include <pbl/services/blob_db/settings_blob_db.h>
+#include <pbl/util/math.h>
 #include <pbl/util/uuid.h>
 
 #include <applib/app_message/app_message_internal.h>
 #include <applib/dict.h>
+#include <process_management/app_install_manager.h>
 #include <process_management/app_manager.h>
+#include <process_management/pebble_process_info.h>
 #include <shell/normal/quick_launch.h>
 
 //! The reserved tuples of one message, applied on KernelBG.
@@ -167,6 +172,171 @@ static void prv_send_message(DumpMessage *msg) {
   }
 }
 
+//! Adds one record, first sending the message if it would not leave room for the count.
+static void prv_add_record(DumpMessage *msg, int32_t dump_id, int32_t *count,
+                           const uint8_t *record, size_t record_len) {
+  if (msg->failed ||
+      APP_MESSAGE_KEY_SETTINGS_DUMP_FIRST + *count >= APP_MESSAGE_KEY_SETTINGS_DUMP_ID) {
+    return;
+  }
+  const size_t tuple_size = sizeof(Tuple) + record_len;
+  if (msg->dict_size + tuple_size + DUMP_INT_TUPLE_SIZE > DUMP_DICT_MAX) {
+    prv_send_message(msg);
+    if (msg->failed) {
+      return;
+    }
+    prv_begin_message(msg, dump_id);
+  }
+  dict_write_data(&msg->iter, APP_MESSAGE_KEY_SETTINGS_DUMP_FIRST + *count, record, record_len);
+  msg->dict_size += tuple_size;
+  (*count)++;
+}
+
+static size_t prv_setting_record(uint8_t *record, size_t index) {
+  const char *name = settings_blob_db_synced_name(index);
+  const size_t name_len = strlen(name);
+  if (name_len > UINT8_MAX) {
+    return 0;
+  }
+  const int size = settings_blob_db_get_current((const uint8_t *)name, name_len,
+                                                &record[1 + name_len], SETTINGS_BLOB_DB_VALUE_MAX);
+  if (size <= 0 || size > SETTINGS_BLOB_DB_VALUE_MAX) {
+    return 0;
+  }
+  record[0] = name_len;
+  memcpy(&record[1], name, name_len);
+  return 1 + name_len + size;
+}
+
+size_t phone_prefs_app_record(uint8_t *record, const PhonePrefsApp *app) {
+  static const char hex[] = "0123456789abcdef";
+  char *name = (char *)&record[1];
+  memcpy(name, PHONE_PREFS_APP_RECORD_PREFIX, strlen(PHONE_PREFS_APP_RECORD_PREFIX));
+  char *c = name + strlen(PHONE_PREFS_APP_RECORD_PREFIX);
+  const uint8_t *bytes = (const uint8_t *)&app->uuid;
+  for (size_t i = 0; i < sizeof(Uuid); i++) {
+    if (i == 4 || i == 6 || i == 8 || i == 10) {
+      *c++ = '-';
+    }
+    *c++ = hex[bytes[i] >> 4];
+    *c++ = hex[bytes[i] & 0xf];
+  }
+  const size_t name_len = c - name;
+  record[0] = name_len;
+  uint8_t *value = &record[1 + name_len];
+  value[0] = app->version.major;
+  value[1] = app->version.minor;
+  value[2] = app->flags;
+  return 1 + name_len + 3;
+}
+
+// -------------------------------------------------------------------------------------------------
+// Installed apps
+
+typedef struct {
+  PhonePrefsApp *apps;
+  size_t count;
+  size_t max;
+  //! false if out of memory
+  bool ok;
+} AppList;
+
+static void prv_collect_app(AppInstallId install_id, AppDBEntry *entry, void *data) {
+  AppList *list = data;
+  if (uuid_is_system(&entry->uuid) || uuid_is_invalid(&entry->uuid) ||
+      app_get_install_id_for_uuid_from_registry(&entry->uuid) != INSTALL_ID_INVALID) {
+    // Built into the firmware
+    return;
+  }
+  if (list->apps && list->count < list->max) {
+    list->apps[list->count] = (PhonePrefsApp){
+      .uuid = entry->uuid,
+      .version = entry->app_version,
+      .flags = (entry->info_flags & PROCESS_INFO_WATCH_FACE) ? PHONE_PREFS_APP_FLAG_WATCHFACE : 0,
+    };
+  }
+  list->count++;
+}
+
+//! The installed third-party apps; free the list's apps.
+static AppList prv_get_apps(void) {
+  AppList list = {};
+  app_db_enumerate_entries(prv_collect_app, &list);
+  if (list.count == 0) {
+    list.ok = true;
+    return list;
+  }
+  list.max = list.count + 4; // in case some get installed in between
+  list.apps = pbl_malloc(list.max * sizeof(PhonePrefsApp));
+  list.count = 0;
+  if (list.apps) {
+    app_db_enumerate_entries(prv_collect_app, &list);
+    list.count = MIN(list.count, list.max);
+    list.ok = true;
+  }
+  return list;
+}
+
+static uint32_t prv_fingerprint(const AppList *list) {
+  return pbl_crc32(0, list->apps, list->count * sizeof(PhonePrefsApp));
+}
+
+//! Whether the installed apps may differ from the last dump, which then is to be sent.
+static bool s_apps_dirty;
+static bool s_apps_pending;
+static bool s_apps_reported;
+static uint32_t s_apps_reported_fingerprint;
+
+static void prv_check_pending(struct pbl_work *work) {
+  if (s_apps_dirty) {
+    s_apps_dirty = false;
+    AppList list = prv_get_apps();
+    if (!list.ok || !s_apps_reported || prv_fingerprint(&list) != s_apps_reported_fingerprint) {
+      s_apps_pending = true;
+    }
+    pbl_free(list.apps);
+  }
+  if (s_apps_pending) {
+    phone_prefs_send_dump();
+  }
+}
+
+static PBL_DELAYED_WORK_DEFINE(s_pending_work, prv_check_pending);
+
+static void prv_schedule_check(void) {
+  pbl_delayed_work_reschedule(&pbl_sys_workq, &s_pending_work,
+                              PBL_MSEC(PHONE_PREFS_CHECK_DELAY_MS));
+}
+
+static void prv_handle_app_install_event(const AppInstallId install_id, void *data) {
+  s_apps_dirty = true;
+  prv_schedule_check();
+}
+
+void phone_prefs_init(void) {
+  static const AppInstallCallback s_callbacks[NUM_INSTALL_EVENT_TYPES] = {
+    [APP_AVAILABLE] = prv_handle_app_install_event,
+    [APP_REMOVED] = prv_handle_app_install_event,
+    [APP_ICON_NAME_UPDATED] = prv_handle_app_install_event,
+    [APP_UPGRADED] = prv_handle_app_install_event,
+    [APP_DB_CLEARED] = prv_handle_app_install_event,
+  };
+  static AppInstallCallbackNode s_callback_node = {
+    .callbacks = s_callbacks,
+  };
+  app_install_register_callback(&s_callback_node);
+}
+
+void phone_prefs_handle_app_running(const Uuid *uuid) {
+  const Uuid graphite = APP_MESSAGE_PHONE_PREFS_APP_UUID;
+  if ((s_apps_pending || s_apps_dirty) && uuid_equal(uuid, &graphite)) {
+    prv_schedule_check();
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// Dump
+
 void phone_prefs_send_dump(void) {
   if (!prv_is_graphite_running()) {
     return;
@@ -190,42 +360,29 @@ void phone_prefs_send_dump(void) {
   prv_begin_message(&msg, dump_id);
 
   int32_t count = 0;
-  for (size_t i = 0; i < settings_blob_db_num_synced() && !msg.failed; i++) {
-    const char *name = settings_blob_db_synced_name(i);
-    const size_t name_len = strlen(name);
-    if (name_len > UINT8_MAX) {
-      continue;
+  for (size_t i = 0; i < settings_blob_db_num_synced(); i++) {
+    const size_t record_len = prv_setting_record(record, i);
+    if (record_len) {
+      prv_add_record(&msg, dump_id, &count, record, record_len);
     }
-    uint8_t *value = &record[1 + name_len];
-    const int size = settings_blob_db_get_current((const uint8_t *)name, name_len, value,
-                                                  SETTINGS_BLOB_DB_VALUE_MAX);
-    if (size <= 0 || size > SETTINGS_BLOB_DB_VALUE_MAX) {
-      continue;
-    }
-    if (APP_MESSAGE_KEY_SETTINGS_DUMP_FIRST + count >= APP_MESSAGE_KEY_SETTINGS_DUMP_ID) {
-      break;
-    }
-    record[0] = name_len;
-    memcpy(&record[1], name, name_len);
-    const size_t record_len = 1 + name_len + size;
+  }
 
-    // Always leave room for the count that ends the last message:
-    const size_t tuple_size = sizeof(Tuple) + record_len;
-    if (msg.dict_size + tuple_size + DUMP_INT_TUPLE_SIZE > DUMP_DICT_MAX) {
-      prv_send_message(&msg);
-      if (msg.failed) {
-        break;
-      }
-      prv_begin_message(&msg, dump_id);
-    }
-    dict_write_data(&msg.iter, APP_MESSAGE_KEY_SETTINGS_DUMP_FIRST + count, record, record_len);
-    msg.dict_size += tuple_size;
-    count++;
+  // The apps are read after the settings, so a change in between gets its own dump:
+  s_apps_dirty = false;
+  AppList apps = prv_get_apps();
+  for (size_t i = 0; i < apps.count; i++) {
+    prv_add_record(&msg, dump_id, &count, record, phone_prefs_app_record(record, &apps.apps[i]));
   }
 
   if (!msg.failed) {
     dict_write_int32(&msg.iter, APP_MESSAGE_KEY_SETTINGS_DUMP_COUNT, count);
     prv_send_message(&msg);
   }
+  if (!msg.failed && apps.ok) {
+    s_apps_pending = false;
+    s_apps_reported = true;
+    s_apps_reported_fingerprint = prv_fingerprint(&apps);
+  }
+  pbl_free(apps.apps);
   pbl_free(buffer);
 }

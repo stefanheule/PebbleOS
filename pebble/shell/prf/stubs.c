@@ -362,3 +362,6 @@ void timeline_peek_handle_process_kill(void) {
 #include <shell/normal/phone_prefs.h>
 void phone_prefs_handle_app_message(const uint8_t *dict, uint16_t dict_size) {
 }
+
+void phone_prefs_handle_app_running(const Uuid *uuid) {
+}

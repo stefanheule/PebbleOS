@@ -3,7 +3,9 @@
 
 #include <string.h>
 
+#include <pbl/kernel/work.h>
 #include <pbl/pp/protocol.h>
+#include <pbl/services/blob_db/app_db.h>
 #include <pbl/services/blob_db/settings_blob_db.h>
 #include <pbl/util/size.h>
 #include <pbl/util/uuid.h>
@@ -11,6 +13,7 @@
 #include <applib/app_message/app_message_internal.h>
 #include <applib/dict.h>
 #include <clar.h>
+#include <process_management/app_install_manager.h>
 #include <process_management/pebble_process_md.h>
 #include <shell/normal/phone_prefs.h>
 #include <shell/normal/quick_launch.h>
@@ -189,6 +192,78 @@ int pbl_pp_send(struct pbl_pp_session *session, uint16_t endpoint_id, const uint
   return s_send_result;
 }
 
+#define MAX_APPS 40
+static AppDBEntry s_app_db[MAX_APPS];
+static int s_app_db_count;
+void app_db_enumerate_entries(AppDBEnumerateCb cb, void *data) {
+  for (int i = 0; i < s_app_db_count; i++) {
+    cb(i + 1, &s_app_db[i], data);
+  }
+}
+
+//! A built-in app that the phone also has an app_db entry for.
+static const Uuid s_builtin_uuid = {0x0b, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+                                    0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f};
+AppInstallId app_get_install_id_for_uuid_from_registry(const Uuid *uuid) {
+  return uuid_equal(uuid, &s_builtin_uuid) ? -5 : INSTALL_ID_INVALID;
+}
+
+static AppInstallCallbackNode *s_install_callbacks;
+void app_install_register_callback(struct AppInstallCallbackNode *callback_info) {
+  s_install_callbacks = callback_info;
+}
+
+static struct pbl_delayed_work *s_scheduled;
+bool pbl_delayed_work_reschedule(struct pbl_workq *q, struct pbl_delayed_work *dwork,
+                                 pbl_timeout_t delay) {
+  cl_assert_equal_p(q, &pbl_sys_workq);
+  s_scheduled = dwork;
+  return false;
+}
+
+//! Runs the scheduled check, if any.
+static bool prv_run_scheduled(void) {
+  struct pbl_delayed_work *work = s_scheduled;
+  s_scheduled = nullptr;
+  if (work) {
+    work->work.fn(&work->work);
+  }
+  return work != nullptr;
+}
+
+static void prv_add_app(const Uuid *uuid, uint8_t major, uint8_t minor, uint32_t info_flags) {
+  cl_assert(s_app_db_count < MAX_APPS);
+  s_app_db[s_app_db_count++] = (AppDBEntry){
+    .uuid = *uuid,
+    .info_flags = info_flags,
+    .app_version = {major, minor},
+  };
+}
+
+static Uuid prv_app_uuid(int i) {
+  return (Uuid){0xa0, (uint8_t)i, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+}
+
+//! Installs @p n third-party apps, every third a watchface, plus entries the dump must skip.
+static void prv_install_apps(int n) {
+  s_app_db_count = 0;
+  const Uuid system = UUID_SYSTEM;
+  prv_add_app(&system, 1, 0, 0);
+  prv_add_app(&s_builtin_uuid, 1, 0, 0);
+  for (int i = 0; i < n; i++) {
+    const Uuid uuid = prv_app_uuid(i);
+    prv_add_app(&uuid, i, 2 * i, (i % 3 == 0) ? PROCESS_INFO_WATCH_FACE : PROCESS_INFO_HAS_WORKER);
+  }
+}
+
+static int prv_num_apps(void) {
+  return s_app_db_count >= 2 ? s_app_db_count - 2 : 0;
+}
+
+static int prv_num_records(void) {
+  return ARRAY_LENGTH(s_synced) - 2 + prv_num_apps();
+}
+
 // Helpers
 ////////////////////////////////////////////////////////////////
 
@@ -201,6 +276,8 @@ void test_phone_prefs__initialize(void) {
   s_set_local_result = false;
   s_quick_launch_calls = 0;
   s_quick_launch_result = false;
+  s_app_db_count = 0;
+  s_scheduled = nullptr;
 }
 
 void test_phone_prefs__cleanup(void) {
@@ -218,6 +295,7 @@ static size_t prv_record(uint8_t *out, const char *name, size_t value_len) {
 static int prv_check_dump(int first, int last, int32_t *dump_id_out) {
   const Uuid graphite = APP_MESSAGE_PHONE_PREFS_APP_UUID;
   int records = 0;
+  int apps = 0;
   int32_t dump_id = 0;
   int setting = 0;
   for (int m = first; m <= last; m++) {
@@ -244,8 +322,26 @@ static int prv_check_dump(int first, int last, int32_t *dump_id_out) {
         cl_assert_equal_i(t->type, TUPLE_INT);
         cl_assert_equal_i(t->value->int32, records);
         has_count = true;
+      } else if (t->length > 4 && memcmp(&t->value->data[1], "app/", 4) == 0) {
+        // Then the third-party apps, in app_db order, after every setting:
+        cl_assert_equal_i(t->key, APP_MESSAGE_KEY_SETTINGS_DUMP_FIRST + records);
+        cl_assert_equal_i(t->type, TUPLE_BYTE_ARRAY);
+        cl_assert_equal_i(records - apps, ARRAY_LENGTH(s_synced) - 2);
+        const AppDBEntry *entry = &s_app_db[2 + apps];
+        const PhonePrefsApp app = {
+          .uuid = entry->uuid,
+          .version = entry->app_version,
+          .flags = (entry->info_flags & PROCESS_INFO_WATCH_FACE) ? 1 : 0,
+        };
+        uint8_t expected[64];
+        const size_t expected_len = phone_prefs_app_record(expected, &app);
+        cl_assert_equal_i(t->length, expected_len);
+        cl_assert(memcmp(t->value->data, expected, expected_len) == 0);
+        records++;
+        apps++;
       } else {
         // Records are numbered without gaps, in whitelist order, skipping unkept settings:
+        cl_assert_equal_i(apps, 0);
         cl_assert_equal_i(t->key, APP_MESSAGE_KEY_SETTINGS_DUMP_FIRST + records);
         cl_assert_equal_i(t->type, TUPLE_BYTE_ARRAY);
         while (s_synced[setting].size == 0) {
@@ -266,6 +362,7 @@ static int prv_check_dump(int first, int last, int32_t *dump_id_out) {
     cl_assert(has_id);
     cl_assert_equal_b(has_count, m == last);
   }
+  cl_assert_equal_i(apps, prv_num_apps());
   if (dump_id_out) {
     *dump_id_out = dump_id;
   }
@@ -301,7 +398,7 @@ void test_phone_prefs__dump(void) {
   phone_prefs_send_dump();
   cl_assert(s_sent_count > 1);
   int32_t dump_id;
-  cl_assert_equal_i(prv_check_dump(0, s_sent_count - 1, &dump_id), ARRAY_LENGTH(s_synced) - 2);
+  cl_assert_equal_i(prv_check_dump(0, s_sent_count - 1, &dump_id), prv_num_records());
   printf("Dump of %d records: %d messages of", (int)ARRAY_LENGTH(s_synced) - 2, s_sent_count);
   for (int m = 0; m < s_sent_count; m++) {
     printf(" %d", (int)s_sent_length[m]);
@@ -371,21 +468,21 @@ void test_phone_prefs__handle_message(void) {
   s_set_local_result = true;
   prv_handle(tuplets, ARRAY_LENGTH(tuplets));
   cl_assert(s_sent_count > 1);
-  cl_assert_equal_i(prv_check_dump(0, s_sent_count - 1, nullptr), ARRAY_LENGTH(s_synced) - 2);
+  cl_assert_equal_i(prv_check_dump(0, s_sent_count - 1, nullptr), prv_num_records());
   s_set_local_result = false;
 
   // So does a quick launch change:
   s_sent_count = 0;
   s_quick_launch_result = true;
   prv_handle(tuplets, 1);
-  cl_assert_equal_i(prv_check_dump(0, s_sent_count - 1, nullptr), ARRAY_LENGTH(s_synced) - 2);
+  cl_assert_equal_i(prv_check_dump(0, s_sent_count - 1, nullptr), prv_num_records());
   s_quick_launch_result = false;
 
   // And a request, of any type:
   const Tuplet request = TupletInteger(APP_MESSAGE_KEY_SETTINGS_REQUEST, (uint8_t)1);
   s_sent_count = 0;
   prv_handle(&request, 1);
-  cl_assert_equal_i(prv_check_dump(0, s_sent_count - 1, nullptr), ARRAY_LENGTH(s_synced) - 2);
+  cl_assert_equal_i(prv_check_dump(0, s_sent_count - 1, nullptr), prv_num_records());
 
   // A message without reserved keys is left alone:
   s_sent_count = 0;
@@ -393,4 +490,98 @@ void test_phone_prefs__handle_message(void) {
   prv_handle(nullptr, 0);
   cl_assert_equal_i(s_set_local_calls, 0);
   cl_assert_equal_i(s_sent_count, 0);
+}
+
+void test_phone_prefs__app_record(void) {
+  const PhonePrefsApp app = {
+    .uuid = UuidMake(0x7e, 0x52, 0x67, 0xac, 0x79, 0x8f, 0x49, 0x53, 0xa6, 0x45, 0x1b, 0x87, 0xa5,
+                     0xc2, 0x9d, 0x96),
+    .version = {2, 20},
+    .flags = PHONE_PREFS_APP_FLAG_WATCHFACE,
+  };
+  uint8_t record[64];
+  const size_t length = phone_prefs_app_record(record, &app);
+  const char name[] = "app/7e5267ac-798f-4953-a645-1b87a5c29d96";
+  cl_assert_equal_i(length, 1 + 40 + 3);
+  cl_assert_equal_i(record[0], 40);
+  cl_assert(memcmp(&record[1], name, 40) == 0);
+  cl_assert_equal_i(record[41], 2);
+  cl_assert_equal_i(record[42], 20);
+  cl_assert_equal_i(record[43], 1);
+}
+
+void test_phone_prefs__dump_with_apps(void) {
+  // Built-in apps are left out; 25 apps still fit 656-byte messages:
+  prv_install_apps(25);
+  phone_prefs_send_dump();
+  cl_assert_equal_i(prv_check_dump(0, s_sent_count - 1, nullptr), prv_num_records());
+  printf("Dump of %d records with %d apps: %d messages of", prv_num_records(), prv_num_apps(),
+         s_sent_count);
+  for (int m = 0; m < s_sent_count; m++) {
+    printf(" %d", (int)s_sent_length[m]);
+  }
+  printf(" bytes\n");
+
+  // And with many more:
+  prv_install_apps(MAX_APPS - 2);
+  s_sent_count = 0;
+  phone_prefs_send_dump();
+  cl_assert_equal_i(prv_check_dump(0, s_sent_count - 1, nullptr), prv_num_records());
+}
+
+static void prv_install_event(InstallEventType type) {
+  cl_assert(s_install_callbacks);
+  s_install_callbacks->callbacks[type](1, s_install_callbacks->data);
+}
+
+void test_phone_prefs__app_change_sends_pending_dump(void) {
+  static bool s_initialized;
+  if (!s_initialized) {
+    phone_prefs_init();
+    s_initialized = true;
+  }
+  const Uuid graphite = APP_MESSAGE_PHONE_PREFS_APP_UUID;
+  const Uuid other = UuidMake(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
+  prv_install_apps(3);
+  phone_prefs_send_dump();
+  s_sent_count = 0;
+
+  // An event that changes nothing sends nothing:
+  prv_install_event(APP_ICON_NAME_UPDATED);
+  cl_assert_equal_b(prv_run_scheduled(), true);
+  cl_assert_equal_i(s_sent_count, 0);
+  phone_prefs_handle_app_running(&graphite);
+  cl_assert_equal_p(s_scheduled, nullptr);
+
+  // A new version, installed while another app is in front, waits for Graphite:
+  s_app_md.uuid = other;
+  s_app_db[3].app_version.minor++;
+  prv_install_event(APP_AVAILABLE);
+  cl_assert_equal_b(prv_run_scheduled(), true);
+  cl_assert_equal_i(s_sent_count, 0);
+  phone_prefs_handle_app_running(&other);
+  cl_assert_equal_p(s_scheduled, nullptr);
+
+  // ...then goes out once Graphite runs with a phone connection:
+  s_app_md.uuid = graphite;
+  s_session = nullptr;
+  phone_prefs_handle_app_running(&graphite);
+  cl_assert_equal_b(prv_run_scheduled(), true);
+  cl_assert_equal_i(s_sent_count, 0);
+  s_session = (struct pbl_pp_session *)0x1234;
+  phone_prefs_handle_app_running(&graphite);
+  cl_assert_equal_b(prv_run_scheduled(), true);
+  cl_assert(s_sent_count > 0);
+  cl_assert_equal_i(prv_check_dump(0, s_sent_count - 1, nullptr), prv_num_records());
+
+  // and only once:
+  s_sent_count = 0;
+  phone_prefs_handle_app_running(&graphite);
+  cl_assert_equal_b(prv_run_scheduled(), false);
+
+  // A removed app is a change too, and is sent at once while Graphite runs:
+  s_app_db_count--;
+  prv_install_event(APP_REMOVED);
+  cl_assert_equal_b(prv_run_scheduled(), true);
+  cl_assert_equal_i(prv_check_dump(0, s_sent_count - 1, nullptr), prv_num_records());
 }

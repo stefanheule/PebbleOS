@@ -54,4 +54,5 @@ pbl_clar_test(test_phone_prefs
   SOURCES
     pebble/shell/normal/phone_prefs.c
     pebble/applib/dict.c
+    subsys/crc/crc32.c
 )

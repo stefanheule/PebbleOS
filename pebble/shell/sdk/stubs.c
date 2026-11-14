@@ -128,6 +128,9 @@ AppInstallId worker_preferences_get_default_worker(void) {
 void phone_prefs_handle_app_message(const uint8_t *dict, uint16_t dict_size) {
 }
 
+void phone_prefs_handle_app_running(const Uuid *uuid) {
+}
+
 // Used by the alarm service to add alarm pins to the timeline
 const PebbleProcessMd *alarms_app_get_info(void) {
   static const PebbleProcessMdSystem s_alarms_app_info = {
