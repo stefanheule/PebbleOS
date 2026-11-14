@@ -105,6 +105,14 @@ there.
     dump id on `0x575054FE` and the last with the count on `0x575054FF`.
     The kernel sends them with transaction ids `0xF8`..`0xFF`, which app
     outboxes skip and whose (n)acks never reach the app.
+  - After the settings, the dump has one record per third-party app in
+    app_db (entries with a built-in app's UUID are left out), named
+    `app/<lowercase uuid with dashes>`, valued `[u8 major][u8 minor]
+    [u8 flags]`: the version the phone installed (appinfo `versionLabel`),
+    flags bit 0 = watchface. A change to the installed apps or their
+    versions marks a dump pending; it goes out 3 s after the change if
+    Graphite is in front with a phone connection, else 3 s after the phone
+    is next told Graphite runs (on launch or when the phone connects).
 
 ## Setup on Linux
 

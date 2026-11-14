@@ -16,6 +16,7 @@
 #include <process_management/app_install_manager.h>
 #include <process_management/app_manager.h>
 #include <process_management/process_manager.h>
+#include <shell/normal/phone_prefs.h>
 
 typedef struct PBL_PACKED {
   AppState state : 8;
@@ -141,4 +142,8 @@ void app_run_state_send_update(const Uuid *uuid, AppState app_state) {
   app_run_state->uuid = *uuid;
   app_run_state->state = app_state;
   pbl_sys_work_call(prv_send_response, app_run_state);
+
+  if (app_state == RUNNING) {
+    phone_prefs_handle_app_running(uuid);
+  }
 }

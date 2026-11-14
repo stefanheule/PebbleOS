@@ -30,6 +30,7 @@
 #include <shell/normal/app_idle_timeout.h>
 #include <shell/normal/battery_ui.h>
 #include <shell/normal/dark_mode_updater.h>
+#include <shell/normal/phone_prefs.h>
 #include <shell/normal/watchface.h>
 #include <shell/prefs.h>
 #include <shell/prefs_private.h>
@@ -61,6 +62,7 @@ void shell_event_loop_init(void) {
   app_outbox_service_init();
   app_message_sender_init();
   watchface_init();
+  phone_prefs_init();
   timeline_peek_init();
   mic_banner_init();
   // Start activity tracking if enabled
