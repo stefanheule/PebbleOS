@@ -49,3 +49,9 @@ pbl_clar_test(test_watchface
     pebble/shell/normal/watchface.c
     pebble/applib/ui/click.c
 )
+
+pbl_clar_test(test_phone_prefs
+  SOURCES
+    pebble/shell/normal/phone_prefs.c
+    pebble/applib/dict.c
+)

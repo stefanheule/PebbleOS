@@ -48,6 +48,10 @@ void app_message_app_protocol_msg_callback(struct pbl_pp_session *session, const
 
     case CMD_ACK:
     case CMD_NACK:
+      if (message->transaction_id >= APP_MESSAGE_KERNEL_TRANSACTION_ID_FIRST) {
+        // For a message the kernel sent for the app, not one from its outbox
+        return;
+      }
       // Received ACK/NACK in response to previously pushed update:
       app_message_out_handle_ack_nack_received(message);
       return;

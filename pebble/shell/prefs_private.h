@@ -34,6 +34,13 @@ int prefs_private_get_backing_len(const uint8_t *key, size_t key_len);
 //! @return true on success, false if failure
 bool prefs_private_read_backing(const uint8_t *key, size_t key_len, void *value, int value_len);
 
+//! Copy the in-memory value of a preference.
+//! @param[in] key the preference's name, as defined in prefs.c
+//! @param[out] value_out the value, truncated to max_len bytes
+//! @param[in] max_len the size of value_out
+//! @return the value's length, or 0 if there is no such preference
+int prefs_private_get_current(const char *key, void *value_out, size_t max_len);
+
 //! Lock the prefs mutex. Must be paired with prefs_private_unlock().
 void prefs_private_lock(void);
 

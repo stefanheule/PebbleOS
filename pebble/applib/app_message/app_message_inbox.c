@@ -1,8 +1,6 @@
 /* SPDX-FileCopyrightText: 2024 Google LLC */
 /* SPDX-License-Identifier: Apache-2.0 */
 
-#include <string.h>
-
 #include <pbl/logging/logging.h>
 
 #include <applib/app_message/app_message_internal.h>
@@ -74,22 +72,20 @@ static bool prv_is_app_with_uuid_running(const Uuid *uuid) {
   return uuid_equal(&app_uuid, uuid);
 }
 
-//! Applies the reserved quick launch keys in a message to Graphite. The kernel checks the app again.
-static void prv_apply_quick_launch_keys(const Uuid *app_uuid, const uint8_t *dict,
-                                        uint16_t dict_size) {
-  const Uuid quick_launch_app = APP_MESSAGE_QUICK_LAUNCH_APP_UUID;
-  if (!uuid_equal(app_uuid, &quick_launch_app)) {
+//! Hands the phone's watch settings in a message to Graphite to the kernel, which checks the app
+//! again.
+static void prv_handle_phone_prefs(const Uuid *app_uuid, const uint8_t *dict, uint16_t dict_size) {
+  const Uuid phone_prefs_app = APP_MESSAGE_PHONE_PREFS_APP_UUID;
+  if (!uuid_equal(app_uuid, &phone_prefs_app)) {
     return;
   }
   DictionaryIterator iterator;
   for (Tuple *tuple = dict_read_begin_from_buffer(&iterator, dict, dict_size); tuple;
        tuple = dict_read_next(&iterator)) {
-    if (tuple->key >= APP_MESSAGE_KEY_QUICK_LAUNCH_FIRST &&
-        tuple->key <= APP_MESSAGE_KEY_QUICK_LAUNCH_LAST && tuple->type == TUPLE_BYTE_ARRAY &&
-        tuple->length == sizeof(Uuid)) {
-      Uuid uuid;
-      memcpy(&uuid, tuple->value->data, sizeof(uuid));
-      sys_app_message_set_quick_launch(tuple->key, &uuid);
+    if (tuple->key >= APP_MESSAGE_KEY_PHONE_PREFS_FIRST &&
+        tuple->key <= APP_MESSAGE_KEY_PHONE_PREFS_LAST) {
+      sys_app_message_handle_phone_prefs(dict, dict_size);
+      return;
     }
   }
 }
@@ -112,8 +108,8 @@ void app_message_inbox_receive(struct pbl_pp_session *session, AppMessagePush *p
   }
 
   const uint16_t dict_size = (length - APP_MSG_HDR_OVRHD_SIZE);
-  prv_apply_quick_launch_keys(&push_message->uuid, (const uint8_t *)&push_message->dictionary,
-                              dict_size);
+  prv_handle_phone_prefs(&push_message->uuid, (const uint8_t *)&push_message->dictionary,
+                         dict_size);
 
   DictionaryIterator iterator;
   dict_read_begin_from_buffer(&iterator, (const uint8_t *)&push_message->dictionary, dict_size);

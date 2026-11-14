@@ -130,6 +130,18 @@ pbl_clar_test(test_prefs_db
   OVERRIDES dummy_board
 )
 
+pbl_clar_test(test_settings_blob_db_local
+  MODULES settings time rand
+  SOURCES
+    pebble/services/blob_db/settings_blob_db.c
+    pebble/shell/normal/prefs.c
+    tests/stubs/stubs_system_resource.c
+    tests/fakes/fake_accel_service.c
+    tests/fakes/fake_rtc.c
+  DEFINES CONFIG_SERVICE_LIGHT_DARK_THRESHOLD=0 CONFIG_SERVICE_ACCEL_MANAGER_DEFAULT_SENSITIVITY=55
+  OVERRIDES dummy_board
+)
+
 pbl_clar_test(test_ios_notif_pref_db
   MODULES timeline_item time rand
   SOURCES

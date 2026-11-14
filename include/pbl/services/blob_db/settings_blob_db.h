@@ -144,4 +144,49 @@ status_t settings_blob_db_insert_with_timestamp(const uint8_t *key, int key_len,
  */
 bool settings_blob_db_phone_supports_sync(void);
 
+/** @brief Largest synced setting value, in bytes. */
+#define SETTINGS_BLOB_DB_VALUE_MAX 64
+
+/**
+ * @brief Number of synced settings: both whitelists, the shell prefs first.
+ *
+ * @return Number of names settings_blob_db_synced_name() returns.
+ */
+size_t settings_blob_db_num_synced(void);
+
+/**
+ * @brief Name of a synced setting.
+ *
+ * @param index Index, below settings_blob_db_num_synced().
+ * @return Name, or NULL if @p index is out of range.
+ */
+const char *settings_blob_db_synced_name(size_t index);
+
+/**
+ * @brief Copy the current (in-memory) value of a synced setting.
+ *
+ * @param name Setting name, without a trailing null.
+ * @param name_len Length of @p name.
+ * @param[out] val_out Value, truncated to @p val_max bytes.
+ * @param val_max Size of @p val_out.
+ * @return The value's size as stored, or 0 if @p name is not a synced setting this watch keeps.
+ */
+int settings_blob_db_get_current(const uint8_t *name, size_t name_len, void *val_out,
+                                 size_t val_max);
+
+/**
+ * @brief Change a synced setting as if it was changed on the watch.
+ *
+ * Updates the in-memory value as a phone write does, but leaves the record dirty so it syncs to
+ * the phone. Nothing is written if the value is unchanged.
+ *
+ * @param name Setting name, without a trailing null.
+ * @param name_len Length of @p name.
+ * @param val Value.
+ * @param val_len Length of @p val; must be the setting's stored size.
+ * @return true if the setting was written.
+ */
+bool settings_blob_db_set_local(const uint8_t *name, size_t name_len, const uint8_t *val,
+                                size_t val_len);
+
 /** @} */
