@@ -42,6 +42,7 @@
 #include <pbl/services/stationary.h>
 #include <pbl/services/timeline/peek.h>
 #include <pbl/settings/settings.h>
+#include <pbl/util/math.h>
 #include <pbl/util/size.h>
 #include <pbl/util/uuid.h>
 
@@ -1371,6 +1372,18 @@ bool prefs_private_write_backing(const uint8_t *key, size_t key_len, const void 
   }
 
   return prv_set_pref_backing(entry, value, value_len);
+}
+
+// ------------------------------------------------------------------------------------
+int prefs_private_get_current(const char *key, void *value_out, size_t max_len) {
+  for (size_t i = 0; i < ARRAY_LENGTH(s_prefs_table); i++) {
+    const PrefsTableEntry *entry = &s_prefs_table[i];
+    if (strcmp(key, entry->key) == 0) {
+      memcpy(value_out, entry->value, MIN(max_len, entry->value_len));
+      return entry->value_len;
+    }
+  }
+  return 0;
 }
 
 // ------------------------------------------------------------------------------------

@@ -319,6 +319,16 @@ bool alerts_preferences_dnd_is_smart_enabled(void);
 void alerts_preferences_dnd_set_smart_enabled(bool enable);
 
 /**
+ * @brief Copy the in-memory value of a preference the settings BlobDB syncs.
+ *
+ * @param key Preference name.
+ * @param[out] value_out Value, truncated to @p max_len bytes.
+ * @param max_len Size of @p value_out.
+ * @return The value's size as stored, or 0 if @p key is not such a preference.
+ */
+int alerts_preferences_get_current(const char *key, void *value_out, size_t max_len);
+
+/**
  * @brief Lock the alerts preferences mutex.
  *
  * Must be paired with alerts_preferences_unlock().

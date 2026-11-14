@@ -124,9 +124,8 @@ AppInstallId worker_preferences_get_default_worker(void) {
   return INSTALL_ID_INVALID;
 }
 
-#include <shell/normal/quick_launch.h>
-bool quick_launch_set_uuid(QuickLaunchSlot slot, const Uuid *uuid) {
-  return false;
+#include <shell/normal/phone_prefs.h>
+void phone_prefs_handle_app_message(const uint8_t *dict, uint16_t dict_size) {
 }
 
 // Used by the alarm service to add alarm pins to the timeline

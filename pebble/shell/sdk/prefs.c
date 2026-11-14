@@ -130,6 +130,11 @@ int prefs_private_get_backing_len(const uint8_t *key, size_t key_len) {
   return 0;
 }
 
+// Not used by the SDK shell
+int prefs_private_get_current(const char *key, void *value_out, size_t max_len) {
+  return 0;
+}
+
 // Exported function used by blob_db API to read our backing store
 // Not used by the SDK shell
 bool prefs_private_read_backing(const uint8_t *key, size_t key_len, void *value, int value_len) {

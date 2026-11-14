@@ -34,15 +34,34 @@ typedef struct PBL_PACKED {
   Dictionary dictionary; //!< Variable length!
 } AppMessagePush;
 
-//! Reserved AppMessage keys with which the phone sets the quick launch apps through the Graphite
-//! watchface, one per QuickLaunchSlot from FIRST to LAST. Each value is a 16-byte app UUID, or
-//! UUID_INVALID to unassign. They still reach the app's inbox like any other key.
-#define APP_MESSAGE_KEY_QUICK_LAUNCH_FIRST (0x57505201)
-#define APP_MESSAGE_KEY_QUICK_LAUNCH_LAST  (0x57505208)
-//! Graphite, the only app whose messages may set them: 7e5267ac-798f-4953-a645-1b87a5c29d96
-#define APP_MESSAGE_QUICK_LAUNCH_APP_UUID                                                     \
+//! Graphite, the watchface through whose AppMessages the phone reads and writes the watch's
+//! settings: 7e5267ac-798f-4953-a645-1b87a5c29d96. Messages to other apps are left alone.
+#define APP_MESSAGE_PHONE_PREFS_APP_UUID                                                      \
   UuidMake(0x7e, 0x52, 0x67, 0xac, 0x79, 0x8f, 0x49, 0x53, 0xa6, 0x45, 0x1b, 0x87, 0xa5, 0xc2, \
            0x9d, 0x96)
+//! Reserved AppMessage keys; they still reach the app's inbox like any other key.
+//! Phone to watch: the quick launch apps, one per QuickLaunchSlot from FIRST to LAST, each a
+//! 16-byte app UUID, or UUID_INVALID to unassign.
+#define APP_MESSAGE_KEY_QUICK_LAUNCH_FIRST (0x57505201)
+#define APP_MESSAGE_KEY_QUICK_LAUNCH_LAST  (0x57505208)
+//! Phone to watch: synced settings, each a `[u8 name length][name][value]` record.
+#define APP_MESSAGE_KEY_SETTING_FIRST (0x57505300)
+#define APP_MESSAGE_KEY_SETTING_LAST  (0x5750533f)
+//! Phone to watch: asks for all synced settings.
+#define APP_MESSAGE_KEY_SETTINGS_REQUEST (0x57505400)
+//! Watch to phone: the synced settings, records from FIRST on, split over messages that each
+//! carry the int32 DUMP_ID; the last one also carries the int32 record COUNT.
+#define APP_MESSAGE_KEY_SETTINGS_DUMP_FIRST (0x57505401)
+#define APP_MESSAGE_KEY_SETTINGS_DUMP_ID    (0x575054fe)
+#define APP_MESSAGE_KEY_SETTINGS_DUMP_COUNT (0x575054ff)
+//! The whole reserved range, for a quick test.
+#define APP_MESSAGE_KEY_PHONE_PREFS_FIRST APP_MESSAGE_KEY_QUICK_LAUNCH_FIRST
+#define APP_MESSAGE_KEY_PHONE_PREFS_LAST  APP_MESSAGE_KEY_SETTINGS_DUMP_COUNT
+
+//! Transaction ids of the messages the kernel sends for an app. An app's outbox skips them, and
+//! (n)acks for them never reach it.
+#define APP_MESSAGE_KERNEL_TRANSACTION_ID_FIRST (0xf8)
+#define APP_MESSAGE_KERNEL_TRANSACTION_IDS      (0x100 - APP_MESSAGE_KERNEL_TRANSACTION_ID_FIRST)
 
 // AppMessageHeader and Uuid size should be opaque to user of API
 #define APP_MSG_HDR_OVRHD_SIZE (offsetof(AppMessagePush, dictionary))

@@ -84,15 +84,27 @@ there.
   timeline and quick launch, and combos still count claimed buttons. The
   Back forwarding above follows the same test, so a pushed window pops on
   Back and a face that drops its Back handler gets the peek dismissal back.
-- `applib/app_message`: the phone sets quick launch through the Graphite
-  watchface (`7e5267ac-798f-4953-a645-1b87a5c29d96`). Reserved AppMessage
-  keys `0x57505201`..`0x57505208` (Tap Up, Tap Down, Hold Up, Hold Center,
-  Hold Down, Hold Back, Back+Up, Up+Down) carry a 16-byte app UUID, or all
-  `0xff` to unassign; absent or malformed keys are left alone. The inbox
-  hands them to `sys_app_message_set_quick_launch`, which ignores them
-  unless Graphite is the running app and writes a `ql*` pref only when it
-  changes (so it syncs to the Core app like a change made on the watch).
-  Graphite still receives the keys and ignores them; ACKs are unchanged.
+- `applib/app_message` + `shell/normal/phone_prefs`: the phone reads and
+  writes the watch settings through the Graphite watchface
+  (`7e5267ac-798f-4953-a645-1b87a5c29d96`); messages to any other app are
+  left alone, and Graphite still receives every key and ignores them. The
+  inbox hands a message with reserved keys to
+  `sys_app_message_handle_phone_prefs`, which copies them and applies them
+  on KernelBG (where the phone's BlobDB writes run):
+  - `0x57505201`..`08` (Tap Up, Tap Down, Hold Up, Hold Center, Hold Down,
+    Hold Back, Back+Up, Up+Down): a 16-byte app UUID, all `0xff` to
+    unassign.
+  - `0x57505300`..`3F`: `[u8 nameLen][name][value]` records for any name in
+    `settings_blob_db.c`'s two whitelists whose value length matches the
+    stored size. `settings_blob_db_set_local` writes it like a change made
+    on the watch (in-memory pref reloaded, record left dirty so it syncs to
+    the Core app), and nothing when the value is unchanged.
+  - `0x57505400`: asks for every synced setting. A message that changed
+    anything sends them as well: records on `0x57505401 + i`, split over
+    AppMessages of at most 656 bytes from Graphite's UUID, each with the
+    dump id on `0x575054FE` and the last with the count on `0x575054FF`.
+    The kernel sends them with transaction ids `0xF8`..`0xFF`, which app
+    outboxes skip and whose (n)acks never reach the app.
 
 ## Setup on Linux
 

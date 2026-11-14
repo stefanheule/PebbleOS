@@ -355,7 +355,10 @@ void settings_blob_db_init(void) {
               (unsigned int)s_num_syncable_settings);
 }
 
-status_t settings_blob_db_insert(const uint8_t *key, int key_len, const uint8_t *val, int val_len) {
+//! Writes a whitelisted setting and reloads it in memory. A write from the phone is marked
+//! synced and not synced back; a local one stays dirty and syncs like a change made on the watch.
+static status_t prv_insert(const uint8_t *key, int key_len, const uint8_t *val, int val_len,
+                           bool from_phone) {
   if (!s_initialized) {
     return E_INTERNAL;
   }
@@ -394,10 +397,10 @@ status_t settings_blob_db_insert(const uint8_t *key, int key_len, const uint8_t 
   // Suppress change callback - we don't want to sync back to phone for phone-originated INSERTs.
   // Keep suppressed through prefs_private_handle_blob_db_event() because validation failures
   // can trigger prefs_private_write_backing() which would fire the callback again.
-  s_suppress_change_callback = true;
+  s_suppress_change_callback = from_phone;
   status = status_from_errno(pbl_settings_set(&file, key, key_len, val, val_len));
 
-  if (PASSED(status)) {
+  if (PASSED(status) && from_phone) {
     // Mark as synced - the record came from the phone so it's already in sync
     pbl_settings_mark_synced(&file, key, key_len);
   }
@@ -423,6 +426,60 @@ status_t settings_blob_db_insert(const uint8_t *key, int key_len, const uint8_t 
 
   s_suppress_change_callback = false;
   return status;
+}
+
+status_t settings_blob_db_insert(const uint8_t *key, int key_len, const uint8_t *val, int val_len) {
+  return prv_insert(key, key_len, val, val_len, true /* from_phone */);
+}
+
+// Settings changed by the phone through the Graphite watchface's AppMessages
+
+size_t settings_blob_db_num_synced(void) {
+  return s_num_syncable_settings + s_num_syncable_notif_prefs;
+}
+
+const char *settings_blob_db_synced_name(size_t index) {
+  if (index < s_num_syncable_settings) {
+    return s_syncable_settings[index];
+  }
+  index -= s_num_syncable_settings;
+  return (index < s_num_syncable_notif_prefs) ? s_syncable_notif_prefs[index] : nullptr;
+}
+
+//! The whitelist entry named exactly @p name (no trailing null), or NULL.
+static const char *prv_find_synced(const uint8_t *name, size_t name_len, bool *is_notif) {
+  for (size_t i = 0; i < settings_blob_db_num_synced(); i++) {
+    const char *synced = settings_blob_db_synced_name(i);
+    if (strlen(synced) == name_len && memcmp(synced, name, name_len) == 0) {
+      *is_notif = (i >= s_num_syncable_settings);
+      return synced;
+    }
+  }
+  return nullptr;
+}
+
+int settings_blob_db_get_current(const uint8_t *name, size_t name_len, void *val_out,
+                                 size_t val_max) {
+  bool is_notif;
+  const char *synced = prv_find_synced(name, name_len, &is_notif);
+  if (!synced) {
+    return 0;
+  }
+  return is_notif ? alerts_preferences_get_current(synced, val_out, val_max)
+                  : prefs_private_get_current(synced, val_out, val_max);
+}
+
+bool settings_blob_db_set_local(const uint8_t *name, size_t name_len, const uint8_t *val,
+                                size_t val_len) {
+  uint8_t current[SETTINGS_BLOB_DB_VALUE_MAX];
+  const int size = settings_blob_db_get_current(name, name_len, current, sizeof(current));
+  if (size <= 0 || (size_t)size > sizeof(current) || (size_t)size != val_len) {
+    return false;
+  }
+  if (memcmp(current, val, val_len) == 0) {
+    return false;
+  }
+  return PASSED(prv_insert(name, name_len, val, val_len, false /* from_phone */));
 }
 
 int settings_blob_db_get_len(const uint8_t *key, int key_len) {

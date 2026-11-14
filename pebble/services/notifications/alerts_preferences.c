@@ -944,6 +944,63 @@ static void prv_reload_schedule_slot(struct pbl_settings_file *file, unsigned in
   }
 }
 
+int alerts_preferences_get_current(const char *key, void *value_out, size_t max_len) {
+#define PREF(pref_key, var) {pref_key, &(var), sizeof(var)}
+  const struct {
+    const char *key;
+    const void *value;
+    size_t size;
+  } prefs[] = {
+    PREF(PREF_KEY_MASK, s_mask),
+    PREF(PREF_KEY_DND_INTERRUPTIONS_MASK, s_dnd_interruptions_mask),
+    PREF(PREF_KEY_DND_SHOW_NOTIFICATIONS, s_dnd_show_notifications),
+    PREF(PREF_KEY_VIBE_INTENSITY, s_vibe_intensity),
+    PREF(PREF_KEY_VIBE_SCORE_NOTIFICATIONS, s_vibe_score_notifications),
+    PREF(PREF_KEY_VIBE_SCORE_INCOMING_CALLS, s_vibe_score_incoming_calls),
+    PREF(PREF_KEY_VIBE_SCORE_ALARMS, s_vibe_score_alarms),
+    PREF(PREF_KEY_DND_MANUALLY_ENABLED, s_do_not_disturb_manually_enabled),
+    PREF(PREF_KEY_DND_SMART_ENABLED, s_do_not_disturb_smart_dnd_enabled),
+    PREF(s_dnd_schedule_keys[WeekdaySchedule].schedule_pref_key,
+         s_dnd_schedule[WeekdaySchedule].schedule),
+    PREF(s_dnd_schedule_keys[WeekdaySchedule].enabled_pref_key,
+         s_dnd_schedule[WeekdaySchedule].enabled),
+    PREF(s_dnd_schedule_keys[WeekendSchedule].schedule_pref_key,
+         s_dnd_schedule[WeekendSchedule].schedule),
+    PREF(s_dnd_schedule_keys[WeekendSchedule].enabled_pref_key,
+         s_dnd_schedule[WeekendSchedule].enabled),
+    PREF(PREF_KEY_NOTIF_WINDOW_TIMEOUT, s_notif_window_timeout_ms),
+    PREF(PREF_KEY_NOTIF_TEXT_SIZE, s_notification_content_size),
+    PREF(PREF_KEY_NOTIF_DESIGN_STYLE, s_notification_alternative_design),
+    PREF(PREF_KEY_NOTIF_VIBE_DELAY, s_notification_vibe_delay),
+    PREF(PREF_KEY_NOTIF_BACKLIGHT, s_notification_backlight),
+    PREF(PREF_KEY_NOTIF_RESPECT_PHONE_SILENCE, s_notification_respect_phone_silence),
+    PREF(PREF_KEY_NOTIF_DISMISSAL_SYNC, s_notification_dismissal_sync),
+    PREF(PREF_KEY_DND_MOTION_BACKLIGHT, s_dnd_motion_backlight),
+    PREF(PREF_KEY_DND_TOUCH_BACKLIGHT, s_dnd_touch_backlight),
+    PREF(PREF_KEY_DND_NOTIFICATION_BACKLIGHT, s_dnd_notification_backlight),
+    PREF(PREF_KEY_DND_AUTO_DISMISS, s_dnd_auto_dismiss),
+  };
+#undef PREF
+
+  int size = 0;
+  pbl_mutex_lock(&s_mutex, PBL_FOREVER);
+  for (size_t i = 0; i < ARRAY_LENGTH(prefs); i++) {
+    if (strcmp(key, prefs[i].key) == 0) {
+      size = prefs[i].size;
+      memcpy(value_out, prefs[i].value, MIN(max_len, prefs[i].size));
+      break;
+    }
+  }
+  for (unsigned int i = 0; size == 0 && i < DND_NUM_SCHEDULE_SLOTS; i++) {
+    if (strcmp(key, s_dnd_schedule_slot_keys[i]) == 0) {
+      size = sizeof(s_dnd_schedule_slots[i]);
+      memcpy(value_out, &s_dnd_schedule_slots[i], MIN(max_len, sizeof(s_dnd_schedule_slots[i])));
+    }
+  }
+  pbl_mutex_unlock(&s_mutex);
+  return size;
+}
+
 void alerts_preferences_handle_blob_db_event(PebbleBlobDBEvent *event) {
   if (event->type != BlobDBEventTypeInsert) {
     return;

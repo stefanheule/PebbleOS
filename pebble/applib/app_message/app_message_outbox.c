@@ -15,7 +15,10 @@
 static void prv_outbox_prepare(AppMessageCtxOutbox *outbox);
 
 static uint16_t prv_get_next_transaction_id(AppMessageCtxOutbox *outbox) {
-  return ++(outbox->transaction_id);
+  do {
+    ++outbox->transaction_id;
+  } while (outbox->transaction_id >= APP_MESSAGE_KERNEL_TRANSACTION_ID_FIRST);
+  return outbox->transaction_id;
 }
 
 static void prv_transition_to_accepting(AppMessageCtxOutbox *outbox) {
