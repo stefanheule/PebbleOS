@@ -114,6 +114,10 @@ void sys_mic_stream_stop(void);
 //! The part of the Listening banner's bar left to the app. See layer_get_mic_accessory_bounds.
 bool sys_mic_banner_get_accessory_area(GRect *area_out);
 
+//! Sets a quick launch slot from one of the reserved APP_MESSAGE_KEY_QUICK_LAUNCH_* keys. Does
+//! nothing unless the running app is APP_MESSAGE_QUICK_LAUNCH_APP_UUID.
+void sys_app_message_set_quick_launch(uint32_t key, const Uuid *uuid);
+
 void sys_get_app_uuid(Uuid *uuid);
 bool sys_app_is_watchface(void);
 AppInstallId sys_app_manager_get_current_app_id(void);

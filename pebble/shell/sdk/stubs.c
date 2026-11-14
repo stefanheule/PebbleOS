@@ -124,6 +124,11 @@ AppInstallId worker_preferences_get_default_worker(void) {
   return INSTALL_ID_INVALID;
 }
 
+#include <shell/normal/quick_launch.h>
+bool quick_launch_set_uuid(QuickLaunchSlot slot, const Uuid *uuid) {
+  return false;
+}
+
 // Used by the alarm service to add alarm pins to the timeline
 const PebbleProcessMd *alarms_app_get_info(void) {
   static const PebbleProcessMdSystem s_alarms_app_info = {

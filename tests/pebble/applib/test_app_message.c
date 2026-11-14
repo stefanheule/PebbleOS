@@ -353,6 +353,17 @@ void sys_current_process_schedule_callback(CallbackEventCallback async_cb, void 
   s_process_manager_callback_data = ctx;
 }
 
+#define MAX_QUICK_LAUNCH_CALLS 8
+static int s_quick_launch_call_count;
+static uint32_t s_quick_launch_keys[MAX_QUICK_LAUNCH_CALLS];
+static Uuid s_quick_launch_uuids[MAX_QUICK_LAUNCH_CALLS];
+void sys_app_message_set_quick_launch(uint32_t key, const Uuid *uuid) {
+  cl_assert(s_quick_launch_call_count < MAX_QUICK_LAUNCH_CALLS);
+  s_quick_launch_keys[s_quick_launch_call_count] = key;
+  s_quick_launch_uuids[s_quick_launch_call_count] = *uuid;
+  ++s_quick_launch_call_count;
+}
+
 static int s_app_inbox_consume_call_count;
 void app_inbox_consume(AppInboxConsumerInfo *consumer_info) {
   ++s_app_inbox_consume_call_count;
@@ -370,6 +381,7 @@ void test_app_message__initialize(void) {
 
   s_sys_psleep_last_millis = 0;
   s_app_inbox_consume_call_count = 0;
+  s_quick_launch_call_count = 0;
 
   app_message_init();
   app_message_set_context(&s_context);
@@ -742,4 +754,85 @@ void test_app_message__kernel_nack_handler(void) {
 
   prv_process_sent_data();
   cl_assert_equal_b(s_nack_received_for_id_2, true);
+}
+
+// Quick launch keys (Graphite):
+////////////////////////////////////
+
+static const Uuid s_graphite_uuid = APP_MESSAGE_QUICK_LAUNCH_APP_UUID;
+static const Uuid s_target_uuid = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+                                   0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10};
+static int s_quick_launch_received_tuples;
+
+static void prv_quick_launch_received_callback(DictionaryIterator *received, void *context) {
+  s_quick_launch_received_tuples = 0;
+  for (Tuple *t = dict_read_first(received); t; t = dict_read_next(received)) {
+    ++s_quick_launch_received_tuples;
+  }
+  s_in_received_is_called = true;
+}
+
+//! Receives a message with: Tap Up = target, Hold Back = UUID_INVALID, a too-short Hold Up, an
+//! integer Hold Down, an unreserved key and a key just past the reserved range.
+static void prv_receive_quick_launch_message(void) {
+  uint8_t dict_buffer[256];
+  DictionaryIterator iter;
+  cl_assert_equal_i(dict_write_begin(&iter, dict_buffer, sizeof(dict_buffer)), DICT_OK);
+  const uint8_t short_value[4] = {1, 2, 3, 4};
+  cl_assert_equal_i(dict_write_data(&iter, 0x57505201, (const uint8_t *)&s_target_uuid,
+                                    sizeof(Uuid)), DICT_OK);
+  cl_assert_equal_i(dict_write_data(&iter, 0x57505206, (const uint8_t *)&UUID_INVALID,
+                                    sizeof(Uuid)), DICT_OK);
+  cl_assert_equal_i(dict_write_data(&iter, 0x57505203, short_value, sizeof(short_value)),
+                    DICT_OK);
+  cl_assert_equal_i(dict_write_uint32(&iter, 0x57505205, 7), DICT_OK);
+  cl_assert_equal_i(dict_write_data(&iter, TEST_KEY, (const uint8_t *)&s_target_uuid,
+                                    sizeof(Uuid)), DICT_OK);
+  cl_assert_equal_i(dict_write_data(&iter, 0x57505209, (const uint8_t *)&s_target_uuid,
+                                    sizeof(Uuid)), DICT_OK);
+  const uint32_t dict_length = dict_write_end(&iter);
+
+  const uint16_t message_length = offsetof(AppMessage, payload[0].push.dictionary) + dict_length;
+  uint8_t buffer[message_length];
+  AppMessage *message = (AppMessage *)buffer;
+  message->command = CMD_PUSH;
+  message->transaction_id = TEST_TRANSACTION_ID_1;
+  message->payload->push.uuid = s_remote_app_uuid;
+  memcpy(&message->payload->push.dictionary, dict_buffer, dict_length);
+  app_message_app_protocol_msg_callback(s_fake_app_comm_session, buffer, message_length, nullptr);
+}
+
+void test_app_message__quick_launch_keys_from_graphite(void) {
+  prv_set_app_uuid(s_graphite_uuid);
+  prv_set_remote_app_uuid(s_graphite_uuid);
+  app_message_register_inbox_received(prv_quick_launch_received_callback);
+  prv_set_remote_receive_handler(prv_receive_ack_nack_callback);
+
+  prv_receive_quick_launch_message();
+  prv_process_sent_data();
+
+  // Only the well-formed reserved keys reach the kernel:
+  cl_assert_equal_i(s_quick_launch_call_count, 2);
+  cl_assert_equal_i(s_quick_launch_keys[0], 0x57505201);
+  cl_assert(uuid_equal(&s_quick_launch_uuids[0], &s_target_uuid));
+  cl_assert_equal_i(s_quick_launch_keys[1], 0x57505206);
+  cl_assert(uuid_is_invalid(&s_quick_launch_uuids[1]));
+
+  // The app still gets every key, and the message is ACK'd:
+  cl_assert_equal_b(s_in_received_is_called, true);
+  cl_assert_equal_i(s_quick_launch_received_tuples, 6);
+  cl_assert_equal_b(s_ack_received_for_id_1, true);
+}
+
+void test_app_message__quick_launch_keys_ignored_for_other_apps(void) {
+  app_message_register_inbox_received(prv_quick_launch_received_callback);
+  prv_set_remote_receive_handler(prv_receive_ack_nack_callback);
+
+  prv_receive_quick_launch_message();
+  prv_process_sent_data();
+
+  cl_assert_equal_i(s_quick_launch_call_count, 0);
+  cl_assert_equal_b(s_in_received_is_called, true);
+  cl_assert_equal_i(s_quick_launch_received_tuples, 6);
+  cl_assert_equal_b(s_ack_received_for_id_1, true);
 }
