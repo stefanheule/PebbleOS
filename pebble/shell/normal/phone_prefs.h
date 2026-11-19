@@ -34,6 +34,9 @@ void phone_prefs_send_dump(void);
 #define PHONE_PREFS_APP_RECORD_PREFIX "app/"
 //! An installed app's record value is `[u8 major][u8 minor][u8 flags]`, with these flags.
 #define PHONE_PREFS_APP_FLAG_WATCHFACE (1 << 0)
+//! The name of the record whose value is the running firmware's version tag, in ASCII
+//! (`v4.47.2-stefan.2`), so the phone can tell a firmware install has reached the watch.
+#define PHONE_PREFS_FIRMWARE_RECORD "fw/version"
 //! Delay before a dump that waits for Graphite, so the phone has seen it start.
 #define PHONE_PREFS_CHECK_DELAY_MS 3000
 
@@ -45,13 +48,19 @@ typedef struct PBL_PACKED {
   uint8_t flags;
 } PhonePrefsApp;
 
+//! Writes the dump record of the running firmware's version tag.
+//! @param record room for 1 + strlen(PHONE_PREFS_FIRMWARE_RECORD) + FW_METADATA_VERSION_TAG_BYTES
+//! @return the record's length, or 0 if the firmware has no tag
+size_t phone_prefs_firmware_record(uint8_t *record);
+
 //! Writes the dump record of an installed app.
 //! @param record room for 1 + 40 + 3 bytes
 //! @return the record's length
 size_t phone_prefs_app_record(uint8_t *record, const PhonePrefsApp *app);
 
 //! Starts watching the installed apps: a change is reported in a dump as soon as Graphite runs
-//! with a phone connection.
+//! with a phone connection. The first such dump after boot goes out regardless, so the phone
+//! learns which firmware the watch booted.
 void phone_prefs_init(void);
 
 //! Tells the phone prefs that the phone was told @p uuid runs, so a pending dump can go out.

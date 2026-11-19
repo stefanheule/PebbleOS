@@ -113,6 +113,13 @@ there.
     versions marks a dump pending; it goes out 3 s after the change if
     Graphite is in front with a phone connection, else 3 s after the phone
     is next told Graphite runs (on launch or when the phone connects).
+  - Between the settings and the apps, one `fw/version` record valued with
+    the running firmware's ASCII version tag (`v4.47.2-stefan.2`). The
+    first dump after every boot goes out unasked (same rule as an app
+    change), so the phone learns within seconds of reconnecting that a
+    firmware install finished: the pebble server turns it into Orbit's
+    `pebble_firmware_installed` command, which settles the "confirm in the
+    Pebble app" notice.
 
 ## Setup on Linux
 

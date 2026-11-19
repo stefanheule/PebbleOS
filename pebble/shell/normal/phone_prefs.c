@@ -23,6 +23,7 @@
 #include <process_management/app_manager.h>
 #include <process_management/pebble_process_info.h>
 #include <shell/normal/quick_launch.h>
+#include <system/version.h>
 
 //! The reserved tuples of one message, applied on KernelBG.
 typedef struct {
@@ -208,6 +209,20 @@ static size_t prv_setting_record(uint8_t *record, size_t index) {
   return 1 + name_len + size;
 }
 
+size_t phone_prefs_firmware_record(uint8_t *record) {
+  const size_t name_len = strlen(PHONE_PREFS_FIRMWARE_RECORD);
+  const char *tag = TINTIN_METADATA.version_tag;
+  const char *end = memchr(tag, '\0', sizeof(TINTIN_METADATA.version_tag));
+  const size_t tag_len = end ? (size_t)(end - tag) : sizeof(TINTIN_METADATA.version_tag);
+  if (tag_len == 0) {
+    return 0;
+  }
+  record[0] = name_len;
+  memcpy(&record[1], PHONE_PREFS_FIRMWARE_RECORD, name_len);
+  memcpy(&record[1 + name_len], tag, tag_len);
+  return 1 + name_len + tag_len;
+}
+
 size_t phone_prefs_app_record(uint8_t *record, const PhonePrefsApp *app) {
   static const char hex[] = "0123456789abcdef";
   char *name = (char *)&record[1];
@@ -314,6 +329,9 @@ static void prv_handle_app_install_event(const AppInstallId install_id, void *da
 }
 
 void phone_prefs_init(void) {
+  // The first dump after boot tells the phone which firmware is running, which is how it learns
+  // that a firmware install has finished:
+  s_apps_pending = true;
   static const AppInstallCallback s_callbacks[NUM_INSTALL_EVENT_TYPES] = {
     [APP_AVAILABLE] = prv_handle_app_install_event,
     [APP_REMOVED] = prv_handle_app_install_event,
@@ -365,6 +383,11 @@ void phone_prefs_send_dump(void) {
     if (record_len) {
       prv_add_record(&msg, dump_id, &count, record, record_len);
     }
+  }
+
+  const size_t firmware_len = phone_prefs_firmware_record(record);
+  if (firmware_len) {
+    prv_add_record(&msg, dump_id, &count, record, firmware_len);
   }
 
   // The apps are read after the settings, so a change in between gets its own dump:

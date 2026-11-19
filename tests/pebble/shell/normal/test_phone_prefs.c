@@ -17,11 +17,15 @@
 #include <process_management/pebble_process_md.h>
 #include <shell/normal/phone_prefs.h>
 #include <shell/normal/quick_launch.h>
+#include <system/version.h>
 
 #include <fake_pbl_malloc.h>
 
 // Fakes
 ////////////////////////////////////////////////////////////////
+
+#define FIRMWARE_TAG "v4.47.2-stefan.2"
+const FirmwareMetadata TINTIN_METADATA = {.version_tag = FIRMWARE_TAG};
 
 //! The synced settings and their sizes on obelix, except two the watch doesn't keep (size 0).
 static const struct {
@@ -261,7 +265,8 @@ static int prv_num_apps(void) {
 }
 
 static int prv_num_records(void) {
-  return ARRAY_LENGTH(s_synced) - 2 + prv_num_apps();
+  // The settings, the firmware's version, then the apps:
+  return ARRAY_LENGTH(s_synced) - 2 + 1 + prv_num_apps();
 }
 
 // Helpers
@@ -296,6 +301,7 @@ static int prv_check_dump(int first, int last, int32_t *dump_id_out) {
   const Uuid graphite = APP_MESSAGE_PHONE_PREFS_APP_UUID;
   int records = 0;
   int apps = 0;
+  int firmware = 0;
   int32_t dump_id = 0;
   int setting = 0;
   for (int m = first; m <= last; m++) {
@@ -322,11 +328,22 @@ static int prv_check_dump(int first, int last, int32_t *dump_id_out) {
         cl_assert_equal_i(t->type, TUPLE_INT);
         cl_assert_equal_i(t->value->int32, records);
         has_count = true;
-      } else if (t->length > 4 && memcmp(&t->value->data[1], "app/", 4) == 0) {
-        // Then the third-party apps, in app_db order, after every setting:
+      } else if (t->length > 3 && memcmp(&t->value->data[1], "fw/", 3) == 0) {
+        // The firmware's version tag, after every setting:
+        static const char expected[] = "\x0a" "fw/version" FIRMWARE_TAG;
         cl_assert_equal_i(t->key, APP_MESSAGE_KEY_SETTINGS_DUMP_FIRST + records);
         cl_assert_equal_i(t->type, TUPLE_BYTE_ARRAY);
-        cl_assert_equal_i(records - apps, ARRAY_LENGTH(s_synced) - 2);
+        cl_assert_equal_i(records, ARRAY_LENGTH(s_synced) - 2);
+        cl_assert_equal_i(t->length, sizeof(expected) - 1);
+        cl_assert(memcmp(t->value->data, expected, sizeof(expected) - 1) == 0);
+        records++;
+        firmware++;
+      } else if (t->length > 4 && memcmp(&t->value->data[1], "app/", 4) == 0) {
+        // Then the third-party apps, in app_db order:
+        cl_assert_equal_i(t->key, APP_MESSAGE_KEY_SETTINGS_DUMP_FIRST + records);
+        cl_assert_equal_i(t->type, TUPLE_BYTE_ARRAY);
+        cl_assert_equal_i(firmware, 1);
+        cl_assert_equal_i(records - apps, ARRAY_LENGTH(s_synced) - 2 + 1);
         const AppDBEntry *entry = &s_app_db[2 + apps];
         const PhonePrefsApp app = {
           .uuid = entry->uuid,
@@ -342,6 +359,7 @@ static int prv_check_dump(int first, int last, int32_t *dump_id_out) {
       } else {
         // Records are numbered without gaps, in whitelist order, skipping unkept settings:
         cl_assert_equal_i(apps, 0);
+        cl_assert_equal_i(firmware, 0);
         cl_assert_equal_i(t->key, APP_MESSAGE_KEY_SETTINGS_DUMP_FIRST + records);
         cl_assert_equal_i(t->type, TUPLE_BYTE_ARRAY);
         while (s_synced[setting].size == 0) {
@@ -363,6 +381,7 @@ static int prv_check_dump(int first, int last, int32_t *dump_id_out) {
     cl_assert_equal_b(has_count, m == last);
   }
   cl_assert_equal_i(apps, prv_num_apps());
+  cl_assert_equal_i(firmware, 1);
   if (dump_id_out) {
     *dump_id_out = dump_id;
   }
@@ -534,12 +553,32 @@ static void prv_install_event(InstallEventType type) {
   s_install_callbacks->callbacks[type](1, s_install_callbacks->data);
 }
 
+//! The only test that calls phone_prefs_init (clar runs tests in name order), so the boot
+//! dump is checked here first.
 void test_phone_prefs__app_change_sends_pending_dump(void) {
-  static bool s_initialized;
-  if (!s_initialized) {
-    phone_prefs_init();
-    s_initialized = true;
-  }
+  const Uuid graphite_ = APP_MESSAGE_PHONE_PREFS_APP_UUID;
+  prv_install_apps(2);
+  phone_prefs_init();
+  cl_assert_equal_p(s_scheduled, nullptr);
+
+  // After boot, Graphite starting before the phone connects has nothing to send to yet...
+  s_session = nullptr;
+  phone_prefs_handle_app_running(&graphite_);
+  cl_assert_equal_b(prv_run_scheduled(), true);
+  cl_assert_equal_i(s_sent_count, 0);
+
+  // ...and once the phone is told Graphite runs, the dump goes out, with the firmware's version:
+  s_session = (struct pbl_pp_session *)0x1234;
+  phone_prefs_handle_app_running(&graphite_);
+  cl_assert_equal_b(prv_run_scheduled(), true);
+  cl_assert(s_sent_count > 0);
+  cl_assert_equal_i(prv_check_dump(0, s_sent_count - 1, nullptr), prv_num_records());
+  s_sent_count = 0;
+
+  // Only once:
+  phone_prefs_handle_app_running(&graphite_);
+  cl_assert_equal_b(prv_run_scheduled(), false);
+
   const Uuid graphite = APP_MESSAGE_PHONE_PREFS_APP_UUID;
   const Uuid other = UuidMake(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
   prv_install_apps(3);
